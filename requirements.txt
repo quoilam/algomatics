@@ -1,0 +1,8 @@
+flask>=2.3.0
+openai>=1.0.0
+tavily>=0.3.0
+Pillow>=10.0.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+matplotlib>=3.7.0
+werkzeug>=2.3.0
