@@ -2,16 +2,22 @@
 单元测试模块 - 用于单独测试每个 Agent 的 API 功能
 
 使用方法:
-    python -m pytest backend/tests/test_agents.py -v
+    # 使用 mock (不需要 API Key)
+    python -m unittest backend.tests.test_agents -v
     
-或者单独测试某个 Agent:
-    python -m pytest backend/tests/test_agents.py::TestRetrievalAgent -v
-    python -m pytest backend/tests/test_agents.py::TestCodeGenerationAgent -v
-    python -m pytest backend/tests/test_agents.py::TestEvaluationAgent -v
-    python -m pytest backend/tests/test_agents.py::TestExecutionAgent -v
-
-使用 unittest 运行:
-    python -m unittest backend.tests.test_agents
+    # 使用真实 API (需要 .env 中的 API Key)
+    python -m unittest backend.tests.test_agents_real -v
+    
+单独测试某个 Agent:
+    # Mock 测试
+    python -m unittest backend.tests.test_agents.TestCodeGenerationAgent -v
+    python -m unittest backend.tests.test_agents.TestEvaluationAgent -v
+    python -m unittest backend.tests.test_agents.TestExecutionAgent -v
+    
+    # 真实 API 测试
+    python -m unittest backend.tests.test_agents_real.TestCodeGenerationAgentReal -v
+    python -m unittest backend.tests.test_agents_real.TestEvaluationAgentReal -v
+    python -m unittest backend.tests.test_agents_real.TestRetrievalAgentReal -v
 """
 
 import os
@@ -19,6 +25,11 @@ import sys
 import unittest
 from unittest.mock import patch, MagicMock, mock_open
 import json
+import dotenv
+
+# 加载 .env 文件（从项目根目录）
+env_path = os.path.join(os.path.dirname(__file__), '..', '..', '.env')
+dotenv.load_dotenv(env_path)
 
 # 添加 backend 到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
