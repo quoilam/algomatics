@@ -1,4 +1,11 @@
-```
-# Environment variables
+**/*.pyc
+uploads/
+__pycache__/
+**/__pycache__
+.DS_Store
+*.log   
+.pytest_cache/
+.venv/
 .env
-```
+*.json
+output_images/
