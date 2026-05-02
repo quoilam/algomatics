@@ -14,8 +14,10 @@ class EvaluationAgent:
     def __init__(self):
         self.api_key = os.getenv("OPENROUTER_API_KEY")
         self.base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-        self.model_text = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
-        self.model_multimodal = os.getenv("OPENROUTER_MULTIMODAL_MODEL", "openai/gpt-4o")
+        # 使用经过测试可用的免费模型 (主模型)
+        self.model_text = os.getenv("OPENROUTER_MODEL", "inclusionai/ling-2.6-1t:free")
+        # 多模态模型 - 如果不可用会回退到文本模型进行评估
+        self.model_multimodal = os.getenv("OPENROUTER_MULTIMODAL_MODEL", "inclusionai/ling-2.6-1t:free")
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable is required")
         
@@ -60,9 +62,6 @@ class EvaluationAgent:
             评估结果字典
         """
         try:
-            # 编码图片
-            image_base64 = self._encode_image(image_path)
-            
             # 构建评估 prompt
             prompt_parts = [f"用户需求：{user_request}"]
             
@@ -76,30 +75,39 @@ class EvaluationAgent:
             
             full_prompt = "\n\n".join(prompt_parts)
             
-            # 调用多模态模型
-            response = self.client.chat.completions.create(
-                model=self.model_multimodal,  # 使用环境变量中的多模态模型，默认 GPT-4o
-                messages=[
-                    {"role": "system", "content": self.system_context},
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": full_prompt
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/png;base64,{image_base64}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                temperature=0.7,
-                max_tokens=2000
-            )
+            # 尝试使用多模态模型 (带图片)
+            try:
+                # 编码图片
+                image_base64 = self._encode_image(image_path)
+                
+                response = self.client.chat.completions.create(
+                    model=self.model_multimodal,
+                    messages=[
+                        {"role": "system", "content": self.system_context},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": full_prompt},
+                                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_base64}"}}
+                            ]
+                        }
+                    ],
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+                
+                # 检查是否支持图像输入
+                if isinstance(response, str) and 'No endpoints found that support image input' in response:
+                    raise ValueError("Model does not support image input")
+                    
+            except Exception as multimodal_error:
+                # 如果多模态失败，回退到纯文本评估 (只评估代码)
+                print(f"[EvaluationAgent] 多模态评估失败 ({multimodal_error}), 回退到代码评估...")
+                return self.evaluate_code(
+                    code=algorithm_code or "",
+                    user_request=user_request,
+                    search_results=search_results
+                )
             
             # Check if response is a string (error case) or has choices attribute
             if isinstance(response, str):
@@ -132,11 +140,12 @@ class EvaluationAgent:
             
         except Exception as e:
             print(f"[EvaluationAgent] Error evaluating image: {e}")
-            return {
-                "success": False,
-                "error": str(e),
-                "evaluation_text": f"评估失败：{str(e)}"
-            }
+            # 最后回退方案：只评估代码
+            return self.evaluate_code(
+                code=algorithm_code or "",
+                user_request=user_request,
+                search_results=search_results
+            )
     
     def evaluate_code(self, 
                      code: str, 
