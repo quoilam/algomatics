@@ -1,41 +1,47 @@
 ```
-# Cache and temporary files
-search_cache.json
-
-# Generated images
-output_images/
-
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 
-# Test files
-.test*
-.pytest_cache/
-
-# Environment files
+# Environment variables
 .env
 .env.local
 *.env.*
-
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
 
 # Logs
 *.log
 
 # Coverage reports
 .coverage
-coverage/
 htmlcov/
+coverage/
 
-# Build artifacts
+# Python dependency management
+pip-log.txt
+pipenv.lock
+requirements.txt.bak
+
+# IDE specific
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Build outputs
 dist/
 build/
 *.egg-info/
+
+# Search cache
+search_cache.json
+
+# Output images (if these are temporary/generated)
+output_images/
+backend/output_images/
 ```

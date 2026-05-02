@@ -16,7 +16,8 @@ class CodeGenerationAgent:
     def __init__(self):
         self.api_key = os.getenv("OPENROUTER_API_KEY")
         self.base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-        self.model = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
+        # 使用经过测试可用的免费模型
+        self.model = os.getenv("OPENROUTER_MODEL", "inclusionai/ling-2.6-1t:free")
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable is required")
         
