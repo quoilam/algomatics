@@ -8,6 +8,9 @@ import base64
 from flask import Flask, request, jsonify, send_from_directory, render_template
 from werkzeug.utils import secure_filename
 from controller.controller import ControllerAgent
+from dotenv import load_dotenv
+
+load_dotenv()  # 加载环境变量
 
 app = Flask(__name__, 
             template_folder='../frontend/templates',
