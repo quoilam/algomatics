@@ -54,11 +54,13 @@ class RetrievalAgent:
         # 检查缓存
         if cache_key in self.cache:
             print(f"[RetrievalAgent] Using cached results for: {query}")
-            cached_results = self.cache[cache_key]
-            if isinstance(cached_results, str):
-                return cached_results
-            # Convert cached list to formatted string
-            return self._format_results(cached_results, query)
+            cached_data = self.cache[cache_key]
+            # 如果缓存的是格式化后的字符串，直接返回
+            if isinstance(cached_data, str):
+                return cached_data
+            # 如果缓存的是列表，转换为格式化字符串
+            elif isinstance(cached_data, list):
+                return self._format_results(cached_data, query)
         
         # 执行搜索
         try:
@@ -106,12 +108,13 @@ class RetrievalAgent:
                 print(f"[RetrievalAgent] Unexpected response type: {type(response)}")
                 return "未找到相关搜索结果"
             
-            # 缓存原始结果列表
-            self.cache[cache_key] = results
+            # 缓存格式化后的字符串，避免每次都要转换
+            formatted_result = self._format_results(results, query)
+            self.cache[cache_key] = formatted_result
             self._save_cache()
             
             print(f"[RetrievalAgent] Found {len(results)} results")
-            return self._format_results(results, query)
+            return formatted_result
             
         except Exception as e:
             print(f"[RetrievalAgent] Search error: {e}")
