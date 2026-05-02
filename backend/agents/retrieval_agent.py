@@ -148,15 +148,5 @@ class RetrievalAgent:
         """
         results = self.search(query, max_results)
         
-        if not results:
-            return "未找到相关搜索结果"
-        
-        formatted = []
-        formatted.append(f"## 搜索结果：{query}\n")
-        
-        for i, result in enumerate(results, 1):
-            formatted.append(f"### {i}. {result['title']}")
-            formatted.append(f"URL: {result['url']}")
-            formatted.append(f"内容：{result['content']}\n")
-        
-        return "\n".join(formatted)
+        # search() 已经返回格式化后的字符串，直接返回即可
+        return results
