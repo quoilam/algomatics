@@ -38,23 +38,29 @@ class RetrievalAgent:
         """生成缓存键"""
         return hashlib.md5(query.encode()).hexdigest()
     
-    def search(self, query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    def search(self, query: str, max_results: int = 5) -> str:
         """
-        执行搜索
+        执行搜索并返回格式化结果
         
         Args:
             query: 搜索查询
             max_results: 最大返回结果数
             
         Returns:
-            搜索结果列表
+            格式化的搜索结果字符串
         """
         cache_key = self._get_cache_key(query)
         
         # 检查缓存
         if cache_key in self.cache:
             print(f"[RetrievalAgent] Using cached results for: {query}")
-            return self.cache[cache_key]
+            cached_data = self.cache[cache_key]
+            # 如果缓存的是格式化后的字符串，直接返回
+            if isinstance(cached_data, str):
+                return cached_data
+            # 如果缓存的是列表，转换为格式化字符串
+            elif isinstance(cached_data, list):
+                return self._format_results(cached_data, query)
         
         # 执行搜索
         try:
@@ -100,18 +106,34 @@ class RetrievalAgent:
                     })
             else:
                 print(f"[RetrievalAgent] Unexpected response type: {type(response)}")
-                return []
+                return "未找到相关搜索结果"
             
-            # 缓存结果
-            self.cache[cache_key] = results
+            # 缓存格式化后的字符串，避免每次都要转换
+            formatted_result = self._format_results(results, query)
+            self.cache[cache_key] = formatted_result
             self._save_cache()
             
             print(f"[RetrievalAgent] Found {len(results)} results")
-            return results
+            return formatted_result
             
         except Exception as e:
             print(f"[RetrievalAgent] Search error: {e}")
-            return []
+            return f"搜索失败：{str(e)}"
+    
+    def _format_results(self, results: List[Dict[str, Any]], query: str) -> str:
+        """格式化搜索结果"""
+        if not results:
+            return "未找到相关搜索结果"
+        
+        formatted = []
+        formatted.append(f"## 搜索结果：{query}\n")
+        
+        for i, result in enumerate(results, 1):
+            formatted.append(f"### {i}. {result['title']}")
+            formatted.append(f"URL: {result['url']}")
+            formatted.append(f"内容：{result['content']}\n")
+        
+        return "\n".join(formatted)
     
     def get_structured_results(self, query: str, max_results: int = 5) -> str:
         """
