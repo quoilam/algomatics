@@ -16,6 +16,7 @@ class CodeGenerationAgent:
     def __init__(self):
         self.api_key = os.getenv("OPENROUTER_API_KEY")
         self.base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        self.model = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable is required")
         
@@ -100,7 +101,7 @@ class CodeGenerationAgent:
         
         try:
             response = self.client.chat.completions.create(
-                model="openai/gpt-4o",  # 使用 OpenRouter 的模型
+                model=self.model,  # 使用环境变量中的模型，默认使用免费的 OpenRouter 模型
                 messages=[
                     {"role": "system", "content": self.system_context},
                     *self.conversation_history
@@ -120,7 +121,18 @@ class CodeGenerationAgent:
                 print(f"[CodeGenerationAgent] {error_msg}")
                 return f"# 代码生成失败：{error_msg}"
             
-            generated_code = response.choices[0].message.content
+            # Handle models that put content in reasoning field
+            message = response.choices[0].message
+            generated_code = message.content
+            
+            # Some models (like nvidia/nemotron) may put content in reasoning field
+            if generated_code is None and hasattr(message, 'reasoning') and message.reasoning:
+                generated_code = message.reasoning
+            
+            if generated_code is None:
+                error_msg = f"API response has no content: {message}"
+                print(f"[CodeGenerationAgent] {error_msg}")
+                return f"# 代码生成失败：{error_msg}"
             
             # 将 AI 响应添加到历史
             self.add_to_history("assistant", generated_code)

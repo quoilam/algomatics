@@ -14,6 +14,8 @@ class EvaluationAgent:
     def __init__(self):
         self.api_key = os.getenv("OPENROUTER_API_KEY")
         self.base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        self.model_text = os.getenv("OPENROUTER_MODEL", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free")
+        self.model_multimodal = os.getenv("OPENROUTER_MULTIMODAL_MODEL", "openai/gpt-4o")
         if not self.api_key:
             raise ValueError("OPENROUTER_API_KEY environment variable is required")
         
@@ -76,7 +78,7 @@ class EvaluationAgent:
             
             # 调用多模态模型
             response = self.client.chat.completions.create(
-                model="openai/gpt-4o",  # GPT-4o 支持多模态
+                model=self.model_multimodal,  # 使用环境变量中的多模态模型，默认 GPT-4o
                 messages=[
                     {"role": "system", "content": self.system_context},
                     {
@@ -165,7 +167,7 @@ class EvaluationAgent:
             full_prompt = "\n\n".join(prompt_parts)
             
             response = self.client.chat.completions.create(
-                model="openai/gpt-4o",
+                model=self.model_text,  # 使用环境变量中的模型，默认使用免费的 OpenRouter 模型
                 messages=[
                     {"role": "system", "content": "你是一个专业的代码审查专家。"},
                     {"role": "user", "content": full_prompt}
@@ -193,7 +195,22 @@ class EvaluationAgent:
                     "evaluation_text": f"代码评估失败：{error_msg}"
                 }
             
-            evaluation_text = response.choices[0].message.content
+            # Handle models that put content in reasoning field
+            message = response.choices[0].message
+            evaluation_text = message.content
+            
+            # Some models (like nvidia/nemotron) may put content in reasoning field
+            if evaluation_text is None and hasattr(message, 'reasoning') and message.reasoning:
+                evaluation_text = message.reasoning
+            
+            if evaluation_text is None:
+                error_msg = f"API response has no content: {message}"
+                print(f"[EvaluationAgent] {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "evaluation_text": f"代码评估失败：{error_msg}"
+                }
             
             print("[EvaluationAgent] Code evaluation completed")
             
