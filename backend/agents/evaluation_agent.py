@@ -99,6 +99,25 @@ class EvaluationAgent:
                 max_tokens=2000
             )
             
+            # Check if response is a string (error case) or has choices attribute
+            if isinstance(response, str):
+                error_msg = f"API returned a string instead of response object: {response[:200]}"
+                print(f"[EvaluationAgent] {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "evaluation_text": f"评估失败：{error_msg}"
+                }
+            
+            if not hasattr(response, 'choices') or not response.choices:
+                error_msg = f"API response has no choices attribute: {type(response)}"
+                print(f"[EvaluationAgent] {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "evaluation_text": f"评估失败：{error_msg}"
+                }
+            
             evaluation_text = response.choices[0].message.content
             
             print("[EvaluationAgent] Evaluation completed")
@@ -154,6 +173,25 @@ class EvaluationAgent:
                 temperature=0.7,
                 max_tokens=2000
             )
+            
+            # Check if response is a string (error case) or has choices attribute
+            if isinstance(response, str):
+                error_msg = f"API returned a string instead of response object: {response[:200]}"
+                print(f"[EvaluationAgent] {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "evaluation_text": f"代码评估失败：{error_msg}"
+                }
+            
+            if not hasattr(response, 'choices') or not response.choices:
+                error_msg = f"API response has no choices attribute: {type(response)}"
+                print(f"[EvaluationAgent] {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "evaluation_text": f"代码评估失败：{error_msg}"
+                }
             
             evaluation_text = response.choices[0].message.content
             

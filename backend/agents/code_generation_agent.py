@@ -109,6 +109,17 @@ class CodeGenerationAgent:
                 max_tokens=4000
             )
             
+            # Check if response is a string (error case) or has choices attribute
+            if isinstance(response, str):
+                error_msg = f"API returned a string instead of response object: {response[:200]}"
+                print(f"[CodeGenerationAgent] {error_msg}")
+                return f"# 代码生成失败：{error_msg}"
+            
+            if not hasattr(response, 'choices') or not response.choices:
+                error_msg = f"API response has no choices attribute: {type(response)}"
+                print(f"[CodeGenerationAgent] {error_msg}")
+                return f"# 代码生成失败：{error_msg}"
+            
             generated_code = response.choices[0].message.content
             
             # 将 AI 响应添加到历史

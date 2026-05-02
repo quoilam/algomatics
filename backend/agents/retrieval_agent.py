@@ -57,27 +57,50 @@ class RetrievalAgent:
             return self.cache[cache_key]
         
         # 执行搜索
-        print(f"[RetrievalAgent] Searching for: {query}")
         try:
+            print(f"[RetrievalAgent] Searching for: {query}")
             response = self.client.search(query, max_results=max_results)
             results = []
             
             if isinstance(response, dict) and 'results' in response:
                 for item in response['results']:
+                    # Ensure all string fields are properly encoded/decoded as UTF-8
+                    title = item.get('title', '')
+                    url = item.get('url', '')
+                    content = item.get('content', '')
+                    
+                    # Clean any problematic characters by encoding and decoding
+                    if isinstance(title, str):
+                        title = title.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                    if isinstance(content, str):
+                        content = content.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                    
                     results.append({
-                        'title': item.get('title', ''),
-                        'url': item.get('url', ''),
-                        'content': item.get('content', ''),
-                        'snippet': item.get('content', '')
+                        'title': title,
+                        'url': url,
+                        'content': content,
+                        'snippet': content
                     })
             elif isinstance(response, list):
                 for item in response:
+                    title = item.get('title', '')
+                    url = item.get('url', '')
+                    content = item.get('content', '')
+                    
+                    if isinstance(title, str):
+                        title = title.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                    if isinstance(content, str):
+                        content = content.encode('utf-8', errors='ignore').decode('utf-8', errors='ignore')
+                    
                     results.append({
-                        'title': item.get('title', ''),
-                        'url': item.get('url', ''),
-                        'content': item.get('content', ''),
-                        'snippet': item.get('content', '')
+                        'title': title,
+                        'url': url,
+                        'content': content,
+                        'snippet': content
                     })
+            else:
+                print(f"[RetrievalAgent] Unexpected response type: {type(response)}")
+                return []
             
             # 缓存结果
             self.cache[cache_key] = results
