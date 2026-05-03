@@ -45,3 +45,8 @@ output_images/
 backend/output_images/
 *.png
 
+.venv/
+.pytest_cache/
+backend/uploads/
+
+.python-version

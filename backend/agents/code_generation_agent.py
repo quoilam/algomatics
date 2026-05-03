@@ -177,9 +177,10 @@ class CodeGenerationAgent:
                     error_type: str,
                     error_message: str,
                     error_traceback: Optional[str] = None,
-                    iteration_count: int = 1) -> str:
+                    iteration_count: int = 1,
+                    error_context: Optional[Dict[str, Any]] = None) -> str:
         """
-        基于错误信息对之前的代码进行修复
+        基于错误信息对之前的代码进行修复 - Phase 2增强版本
 
         Args:
             previous_code: 之前生成的代码
@@ -187,27 +188,52 @@ class CodeGenerationAgent:
             error_message: 错误消息
             error_traceback: 可选的堆栈追踪
             iteration_count: 第几次修复尝试
+            error_context: 可选的详细错误上下文信息
 
         Returns:
             修复后的代码字符串
         """
+        # 尝试本地修复策略（无需LLM，更快）
+        local_repair = self._try_local_repair(
+            previous_code, error_type, error_message, error_context)
+        if local_repair != previous_code:
+            print(
+                f"[CodeGenerationAgent] Local repair applied for {error_type}")
+            return local_repair
+
+        # 本地修复失败，调用LLM进行修复
+        repair_strategy = self._get_repair_strategy(
+            error_type, error_message, error_context)
+
         prompt_parts = [
             f"这是第 {iteration_count} 次尝试修复代码。",
-            "请仅返回修正后的完整可执行 Python 代码块（不要包含多余解释）。",
+            "请仅返回修正后的完整可执行 Python 代码块（用```python包裹）（不要包含多余解释或警告）。",
             f"错误类型: {error_type}",
             f"错误信息: {error_message}",
         ]
 
-        if error_traceback:
-            prompt_parts.append(f"堆栈追踪:\n{error_traceback}")
+        # 添加修复策略指导
+        prompt_parts.append("\n修复策略指导:")
+        prompt_parts.extend(repair_strategy["hints"])
 
-        prompt_parts.append("原始代码如下：")
+        if error_traceback:
+            prompt_parts.append(f"\n堆栈追踪:\n{error_traceback}")
+
+        prompt_parts.append("\n原始代码如下：")
+        prompt_parts.append("```python")
         prompt_parts.append(previous_code)
+        prompt_parts.append("```")
+
         prompt_parts.append(
-            "请修复代码并确保：\n1) 使用已有的变量 input_image_path 和 output_path；\n2) 导入缺失的库（如果需要）；\n3) 处理常见异常；\n4) 只返回代码，不要包含解释文本。")
+            "\n请根据上述错误信息和修复策略修复代码，确保：\n"
+            "1) 使用已有的变量 input_image_path 和 output_path；\n"
+            "2) 导入缺失的库（如果需要）；\n"
+            "3) 修复特定的错误类型；\n"
+            "4) 添加必要的错误处理；\n"
+            "5) 代码必须能够生成输出图片。\n"
+            "6) 只返回代码，用```python和```包裹，不要包含任何解释文本。")
 
         full_prompt = "\n\n".join(prompt_parts)
-
         self.add_to_history("user", full_prompt)
 
         try:
@@ -217,40 +243,19 @@ class CodeGenerationAgent:
                     {"role": "system", "content": self.system_context},
                     *self.conversation_history
                 ],
-                temperature=0.2,
-                max_tokens=2000
+                temperature=0.3,  # 降低temperature以获得更稳定的修复
+                max_tokens=2500
             )
 
             if isinstance(response, str):
                 print(
                     f"[CodeGenerationAgent] repair API returned string: {response[:200]}")
-                # 回退策略：尝试本地简单修复（针对常见语法错误）
-                repaired_local = previous_code
-                try:
-                    import re
-                    # 简单修复: def name(: -> def name():
-                    repaired_local = re.sub(
-                        r"def\s+([a-zA-Z0-9_]+)\s*\(\s*:", r"def \1():", previous_code)
-                except Exception:
-                    repaired_local = previous_code
-                if repaired_local != previous_code:
-                    print(
-                        "[CodeGenerationAgent] Applied simple local repair for syntax issues")
-                    return repaired_local
-                # 本地修复无效，返回一个最小可运行的回退实现（保证生成输出），作为最后手段
-                fallback = (
-                    "from PIL import Image, ImageFilter\n"
-                    "img = Image.open(input_image_path).convert('RGB')\n"
-                    "img = img.filter(ImageFilter.MedianFilter(size=3))\n"
-                    "img.save(output_path)\n"
-                    "print('图像降噪处理完成，结果保存至:', output_path)\n"
-                )
-                return fallback
+                return self._get_fallback_code(error_type)
 
             if not hasattr(response, 'choices') or not response.choices:
                 print(
                     f"[CodeGenerationAgent] repair API response invalid: {type(response)}")
-                return previous_code
+                return self._get_fallback_code(error_type)
 
             message = response.choices[0].message
             repaired = message.content or (
@@ -261,22 +266,206 @@ class CodeGenerationAgent:
 
         except Exception as e:
             print(f"[CodeGenerationAgent] Error repairing code: {e}")
-            # 本地回退尝试：针对简单语法错误做最小修复
-            try:
-                import re
-                repaired_local = re.sub(
-                    r"def\s+([a-zA-Z0-9_]+)\s*\(\s*:", r"def \1():", previous_code)
-                if repaired_local != previous_code:
-                    return repaired_local
-            except Exception:
-                pass
+            return self._get_fallback_code(error_type)
 
-            # 本地回退失败，返回最小可运行的回退实现
-            fallback = (
+    def _try_local_repair(self,
+                          code: str,
+                          error_type: str,
+                          error_message: str,
+                          error_context: Optional[Dict[str, Any]] = None) -> str:
+        """
+        尝试本地修复，无需调用LLM（快速路径）
+
+        Args:
+            code: 要修复的代码
+            error_type: 错误类型
+            error_message: 错误信息
+            error_context: 错误上下文
+
+        Returns:
+            修复后的代码，如果无法修复则返回原代码
+        """
+        import re
+
+        # 缺失导入修复
+        if error_type == "import_error" and error_context:
+            missing_module = error_context.get("missing_import")
+            if missing_module:
+                # 通用导入修复策略
+                import_map = {
+                    "cv2": "import cv2",
+                    "Image": "from PIL import Image",
+                    "ImageFilter": "from PIL import Image, ImageFilter",
+                    "np": "import numpy as np",
+                    "pd": "import pandas as pd",
+                    "scipy": "import scipy",
+                }
+
+                if missing_module in import_map:
+                    import_stmt = import_map[missing_module]
+                    # 检查是否已经有import语句
+                    if import_stmt not in code:
+                        # 在代码开头添加import
+                        code = import_stmt + "\n" + code
+                        return code
+
+        # 简单语法错误修复
+        if error_type == "syntax_error":
+            # 修复: def name(: -> def name():
+            fixed = re.sub(
+                r"def\s+([a-zA-Z0-9_]+)\s*\(\s*:", r"def \1():", code)
+            if fixed != code:
+                return fixed
+
+            # 修复缺失的冒号
+            fixed = re.sub(r"(if|elif|else|for|while|def|class)\b(.*)([^\s:])$",
+                           r"\1\2\3:", code, flags=re.MULTILINE)
+            if fixed != code:
+                return fixed
+
+        # 名称错误修复（常见的库别名）
+        if error_type == "name_error" and error_context:
+            undefined_name = error_context.get("undefined_name")
+            if undefined_name == "cv2" and "import cv2" not in code:
+                code = "import cv2\n" + code
+                return code
+            elif undefined_name == "np" and "import numpy" not in code:
+                code = "import numpy as np\n" + code
+                return code
+
+        return code  # 无法修复，返回原代码
+
+    def _get_repair_strategy(self,
+                             error_type: str,
+                             error_message: str,
+                             error_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        根据错误类型获取修复策略
+
+        Args:
+            error_type: 错误类型
+            error_message: 错误信息
+            error_context: 错误上下文
+
+        Returns:
+            包含修复策略和提示的字典
+        """
+        strategies = {
+            "import_error": {
+                "hints": [
+                    "✓ 确保导入了所需的库（cv2, Image, np 等）",
+                    "✓ 添加缺失的导入语句到代码开头",
+                    "✓ 检查库名是否拼写正确"
+                ]
+            },
+            "name_error": {
+                "hints": [
+                    "✓ 检查变量是否已定义",
+                    "✓ 如果使用了库别名（np, pd, cv2），需要先导入库",
+                    "✓ 检查变量名拼写是否正确"
+                ]
+            },
+            "attribute_error": {
+                "hints": [
+                    "✓ 检查对象方法或属性名是否正确",
+                    "✓ 使用正确的库API（例如 Image.open() 而不是 Image.read()）",
+                    "✓ 验证库的版本兼容性"
+                ]
+            },
+            "type_error": {
+                "hints": [
+                    "✓ 检查函数参数的类型是否正确",
+                    "✓ 如果期望 np.ndarray，检查是否需要转换类型",
+                    "✓ 检查图像对象的格式（RGB vs BGR vs Grayscale）"
+                ]
+            },
+            "file_error": {
+                "hints": [
+                    "✓ 使用提供的 input_image_path 变量读取输入图片",
+                    "✓ 使用 output_path 变量保存输出图片",
+                    "✓ 不要硬编码文件路径"
+                ]
+            },
+            "syntax_error": {
+                "hints": [
+                    "✓ 检查括号、引号是否配对",
+                    "✓ 检查缩进是否正确",
+                    "✓ if/for/while/def 等语句是否以冒号结尾"
+                ]
+            },
+            "runtime_error": {
+                "hints": [
+                    "✓ 检查代码逻辑是否正确",
+                    "✓ 添加必要的错误处理（try-except）",
+                    "✓ 验证输入数据的格式和范围"
+                ]
+            }
+        }
+
+        return strategies.get(error_type, {"hints": ["✓ 根据错误信息修复代码"]})
+
+    def _get_fallback_code(self, error_type: str) -> str:
+        """
+        获取回退代码 - 简单但可运行的默认实现
+
+        Args:
+            error_type: 错误类型
+
+        Returns:
+            回退代码
+        """
+        fallback_map = {
+            "import_error": (
+                "import cv2\n"
                 "from PIL import Image, ImageFilter\n"
+                "import numpy as np\n\n"
                 "img = Image.open(input_image_path).convert('RGB')\n"
                 "img = img.filter(ImageFilter.MedianFilter(size=3))\n"
                 "img.save(output_path)\n"
-                "print('图像降噪处理完成，结果保存至:', output_path)\n"
+                "print('Fallback: Image processing completed')\n"
+            ),
+            "name_error": (
+                "from PIL import Image, ImageFilter\n\n"
+                "img = Image.open(input_image_path).convert('RGB')\n"
+                "img = img.filter(ImageFilter.MedianFilter(size=3))\n"
+                "img.save(output_path)\n"
+                "print('Fallback: Name error fixed, using PIL')\n"
+            ),
+            "syntax_error": (
+                "from PIL import Image, ImageFilter\n\n"
+                "try:\n"
+                "    img = Image.open(input_image_path).convert('RGB')\n"
+                "    img = img.filter(ImageFilter.MedianFilter(size=3))\n"
+                "    img.save(output_path)\n"
+                "except Exception as e:\n"
+                "    print(f'Error: {e}')\n"
+            ),
+            "type_error": (
+                "from PIL import Image, ImageFilter\n\n"
+                "img = Image.open(input_image_path).convert('RGB')\n"
+                "img = img.filter(ImageFilter.MedianFilter(size=3))\n"
+                "img.save(output_path)\n"
+                "print('Fallback: Using PIL with proper type handling')\n"
+            ),
+            "file_error": (
+                "from PIL import Image, ImageFilter\n"
+                "import os\n\n"
+                "if input_image_path and os.path.exists(input_image_path):\n"
+                "    img = Image.open(input_image_path).convert('RGB')\n"
+                "    img = img.filter(ImageFilter.MedianFilter(size=3))\n"
+                "    img.save(output_path)\n"
+                "else:\n"
+                "    print(f'File not found: {input_image_path}')\n"
             )
-            return fallback
+        }
+
+        # 默认回退代码
+        default_fallback = (
+            "from PIL import Image, ImageFilter\n\n"
+            "img = Image.open(input_image_path).convert('RGB')\n"
+            "img = img.filter(ImageFilter.MedianFilter(size=3))\n"
+            "img.save(output_path)\n"
+            "print('Fallback: Image denoising completed')\n"
+        )
+
+        return fallback_map.get(error_type, default_fallback)

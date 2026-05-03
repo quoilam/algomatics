@@ -17,11 +17,9 @@ class EvaluationAgent:
         self.base_url = os.getenv(
             "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
         # 使用经过测试可用的免费模型 (主模型)
-        self.model_text = os.getenv(
-            "OPENROUTER_MODEL", "inclusionai/ling-2.6-1t:free")
+        self.model_text = os.getenv("OPENROUTER_MODEL")
         # 多模态模型 - 如果不可用会回退到文本模型进行评估
-        self.model_multimodal = os.getenv(
-            "OPENROUTER_MULTIMODAL_MODEL", "inclusionai/ling-2.6-1t:free")
+        self.model_multimodal = os.getenv("OPENROUTER_IMAGE_MODEL")
         if not self.api_key:
             raise ValueError(
                 "OPENROUTER_API_KEY environment variable is required")

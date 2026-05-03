@@ -246,7 +246,9 @@ class ControllerAgent:
                                     "error", ""),
                                 error_traceback=execution_result.get(
                                     "error_traceback", ""),
-                                iteration_count=repair_attempt
+                                iteration_count=repair_attempt,
+                                error_context=execution_result.get(
+                                    "error_context", {})
                             )
 
                         repaired_code = self.code_generation_agent.extract_code_block(

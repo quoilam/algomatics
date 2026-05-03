@@ -74,6 +74,9 @@ class ExecutionAgent:
         execution_log = []
         success = False
         error_message = None
+        error_type = None
+        error_context = {}
+        repair_suggestion = {}
 
         try:
             execution_log.append("开始执行代码...")
@@ -124,20 +127,11 @@ class ExecutionAgent:
             execution_log.append(f"堆栈跟踪:\n{error_traceback}")
             print(f"[ExecutionAgent] Error executing code: {e}")
 
-            # 错误分类，供自动修复逻辑使用
-            exc_type = type(e).__name__.lower()
-            if 'importerror' in exc_type or 'module' in error_message.lower():
-                error_type = 'import_error'
-            elif 'syntaxerror' in exc_type or 'invalid syntax' in error_message.lower():
-                error_type = 'syntax_error'
-            elif 'nameerror' in exc_type:
-                error_type = 'name_error'
-            elif 'attributeerror' in exc_type:
-                error_type = 'attribute_error'
-            elif 'typeerror' in exc_type:
-                error_type = 'type_error'
-            else:
-                error_type = 'runtime_error'
+            # 详细的错误诊断和分类，为自动修复提供上下文
+            error_info = self._diagnose_error(e, error_traceback, code)
+            error_type = error_info["error_type"]
+            error_context = error_info["context"]
+            repair_suggestion = error_info["repair_suggestion"]
 
         return {
             "success": success,
@@ -145,8 +139,130 @@ class ExecutionAgent:
             "output_path_raw": output_path,
             "execution_log": "\n".join(execution_log),
             "error": error_message,
-            "error_type": locals().get('error_type', None),
-            "error_traceback": locals().get('error_traceback', None)
+            "error_type": error_type,
+            "error_traceback": locals().get('error_traceback', None),
+            "error_context": error_context,
+            "repair_suggestion": repair_suggestion
+        }
+
+    def _diagnose_error(self,
+                        exception: Exception,
+                        error_traceback: str,
+                        code: str) -> Dict[str, Any]:
+        """
+        诊断执行错误，提供详细分类和修复建议
+
+        Args:
+            exception: 异常对象
+            error_traceback: 堆栈追踪
+            code: 执行的代码
+
+        Returns:
+            包含错误诊断信息的字典
+        """
+        error_message = str(exception)
+        exc_type = type(exception).__name__
+
+        # 初始化诊断信息
+        error_type = "runtime_error"
+        context = {
+            "exception_type": exc_type,
+            "error_message": error_message,
+            "affected_line": None,
+            "missing_import": None,
+            "undefined_name": None
+        }
+        repair_suggestion = {
+            "strategy": "retry",
+            "hints": []
+        }
+
+        # 导入错误诊断
+        if exc_type == "ModuleNotFoundError" or exc_type == "ImportError":
+            error_type = "import_error"
+            repair_suggestion["strategy"] = "add_import"
+
+            # 提取缺失的模块名
+            import re
+            match = re.search(
+                r"No module named ['\"]?([^'\"]+)['\"]?", error_message)
+            if match:
+                missing_module = match.group(1)
+                context["missing_import"] = missing_module
+                repair_suggestion["hints"].append(
+                    f"缺失模块: {missing_module}. 请添加导入: import {missing_module.split('.')[0]}"
+                )
+
+        # 名称错误诊断
+        elif exc_type == "NameError":
+            error_type = "name_error"
+            import re
+            match = re.search(r"name '([^']+)' is not defined", error_message)
+            if match:
+                undefined_name = match.group(1)
+                context["undefined_name"] = undefined_name
+                repair_suggestion["hints"].append(
+                    f"未定义的变量或函数: {undefined_name}"
+                )
+                # 检查是否是常见的库别名问题
+                if undefined_name in ["cv2", "np", "pd", "plt"]:
+                    repair_suggestion["hints"].append(
+                        f"请确保导入了 {undefined_name} 库"
+                    )
+
+        # 属性错误诊断
+        elif exc_type == "AttributeError":
+            error_type = "attribute_error"
+            import re
+            match = re.search(
+                r"module '([^']+)' has no attribute '([^']+)'", error_message)
+            if match:
+                module_name = match.group(1)
+                attr_name = match.group(2)
+                repair_suggestion["hints"].append(
+                    f"模块 {module_name} 没有属性 {attr_name}. 请检查拼写或使用的库版本"
+                )
+
+        # 类型错误诊断
+        elif exc_type == "TypeError":
+            error_type = "type_error"
+            repair_suggestion["hints"].append(
+                "类型不匹配。请检查函数参数类型是否正确"
+            )
+
+        # 文件/IO错误诊断
+        elif exc_type == "FileNotFoundError" or exc_type == "IOError":
+            error_type = "file_error"
+            repair_suggestion["hints"].append(
+                "文件不存在或路径错误。请确保输入图片路径正确"
+            )
+
+        # 语法错误（通常不会在exec时出现，但保留以防万一）
+        elif exc_type == "SyntaxError":
+            error_type = "syntax_error"
+            repair_suggestion["strategy"] = "fix_syntax"
+            repair_suggestion["hints"].append(
+                "代码语法错误。请检查括号、引号等是否匹配"
+            )
+
+        # 通用运行时错误
+        else:
+            error_type = "runtime_error"
+            repair_suggestion["hints"].append(
+                "运行时错误。请检查代码逻辑和输入数据"
+            )
+
+        # 尝试从堆栈追踪中提取出错行信息
+        if "line" in error_traceback.lower():
+            import re
+            match = re.search(r'line (\d+)', error_traceback)
+            if match:
+                context["affected_line"] = int(match.group(1))
+
+        return {
+            "error_type": error_type,
+            "context": context,
+            "repair_suggestion": repair_suggestion
         }
 
     def summarize_execution(self,

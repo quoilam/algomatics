@@ -3,8 +3,8 @@
 MVP端到端测试脚本 - 验证自动迭代能力
 """
 
-from dotenv import load_dotenv
 from controller.controller import ControllerAgent
+from dotenv import load_dotenv
 import sys
 import os
 import json

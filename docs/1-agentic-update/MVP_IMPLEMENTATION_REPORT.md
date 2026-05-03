@@ -133,6 +133,12 @@ export OPENROUTER_MODEL="qwen/qwen-turbo"
 - CodeGenerationAgent支持错误修复模式
 - 修复重试次数单独计数
 
+### 阶段2实现进展（当前）
+- ExecutionAgent 已返回结构化错误信息：`error_type`、`error_context`、`repair_suggestion`
+- CodeGenerationAgent 已支持基于错误上下文的本地修复与 LLM 修复双路径
+- Controller 已将 `error_context` 传递给修复流程，形成可闭环的重试链路
+- 已新增 `test_phase2_error_repair.py` 用于本地故障注入验证错误诊断与修复执行
+
 ### 阶段3：主动规划与决策（4-6周）
 - 引入TaskParser理解任务意图
 - 设计执行策略库

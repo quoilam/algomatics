@@ -15,12 +15,12 @@
 
 #### openrouter qwen/qwen-turbo
 ```
-curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" -H "HTTP-Referer: https://openrouter.ai" -H "X-Title: Test" -H "Content-Type: application/json" -d '{"model": "qwen/qwen-turbo", "messages": [{"role": "user", "content": "ping"}]}' $OPENROUTER_BASE_URL/chat/completions
+curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" -H "HTTP-Referer: https://openrouter.ai" -H "X-Title: Test" -H "Content-Type: application/json" -d '{"model": "$OPENROUTER_MODEL", "messages": [{"role": "user", "content": "ping"}]}' $OPENROUTER_BASE_URL/chat/completions
 ```
 
 #### openrouter qwen/qwen-vl-plus
 ```
-curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" -H "HTTP-Referer: https://openrouter.ai" -H "X-Title: Test" -H "Content-Type: application/json" -d '{"model": "qwen/qwen-vl-plus", "messages": [{"role": "user", "content": "ping"}]}' $OPENROUTER_BASE_URL/chat/completions
+curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" -H "HTTP-Referer: https://openrouter.ai" -H "X-Title: Test" -H "Content-Type: application/json" -d '{"model": "$OPENROUTER_IMAGE_MODEL", "messages": [{"role": "user", "content": "ping"}]}' $OPENROUTER_BASE_URL/chat/completions
 ```
 
 #### tavily
