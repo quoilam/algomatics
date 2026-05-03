@@ -11,22 +11,26 @@ from openai import OpenAI
 
 class EvaluationAgent:
     """评估 Agent，负责评估生成图片的质量"""
-    
+
     def __init__(self):
         self.api_key = os.getenv("OPENROUTER_API_KEY")
-        self.base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+        self.base_url = os.getenv(
+            "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
         # 使用经过测试可用的免费模型 (主模型)
-        self.model_text = os.getenv("OPENROUTER_MODEL", "inclusionai/ling-2.6-1t:free")
+        self.model_text = os.getenv(
+            "OPENROUTER_MODEL", "inclusionai/ling-2.6-1t:free")
         # 多模态模型 - 如果不可用会回退到文本模型进行评估
-        self.model_multimodal = os.getenv("OPENROUTER_MULTIMODAL_MODEL", "inclusionai/ling-2.6-1t:free")
+        self.model_multimodal = os.getenv(
+            "OPENROUTER_MULTIMODAL_MODEL", "inclusionai/ling-2.6-1t:free")
         if not self.api_key:
-            raise ValueError("OPENROUTER_API_KEY environment variable is required")
-        
+            raise ValueError(
+                "OPENROUTER_API_KEY environment variable is required")
+
         self.client = OpenAI(
             api_key=self.api_key,
             base_url=self.base_url
         )
-        
+
         self.system_context = """
 你是一个专业的图像质量评估专家。你需要对生成的图片进行客观、全面的评估。
 
@@ -55,18 +59,25 @@ class EvaluationAgent:
 ## 整体评语
 一句话总结整体质量
 """
-    
+
+    def _encode_image(self, image_path: str) -> str:
+        """将图片编码为 base64"""
+        with open(image_path, 'rb') as f:
+            image_data = base64.b64encode(f.read()).decode('utf-8')
+        return image_data
+
     def _extract_score(self, text: str) -> int:
         """从评估文本中提取总体评分 (0-10)"""
         # 查找 "总体评分：X/10" 的格式
-        match = re.search(r'总体评分[:：]\s*(\d+(?:\.\d+)?)\s*/?10?', text, re.IGNORECASE)
+        match = re.search(
+            r'总体评分[:：]\s*(\d+(?:\.\d+)?)\s*/?10?', text, re.IGNORECASE)
         if match:
             try:
                 score = float(match.group(1))
                 return min(10, max(0, int(score)))
             except (ValueError, IndexError):
                 pass
-        
+
         # 如果找不到，尝试其他评分格式
         matches = re.findall(r'(\d+)\s*/?10', text)
         if matches:
@@ -74,10 +85,10 @@ class EvaluationAgent:
                 return min(10, max(0, int(matches[0])))
             except (ValueError, IndexError):
                 pass
-        
+
         # 如果仍然找不到，返回5作为默认分数
         return 5
-    
+
     def _extract_improvements(self, text: str) -> str:
         """从评估文本中提取改进建议"""
         # 查找 "需要改进的方面" 部分
@@ -86,61 +97,140 @@ class EvaluationAgent:
             text,
             re.IGNORECASE | re.DOTALL
         )
-        
+
         if improvements_match:
             improvements = improvements_match.group(1).strip()
             # 限制长度
             if len(improvements) > 500:
                 improvements = improvements[:500] + "..."
             return improvements
-        
+
         return ""
-    
-    def evaluate_image(self, 
-                      image_path: str, 
-                      user_request: str,
-                      algorithm_code: Optional[str] = None,
-                      search_results: Optional[str] = None) -> Dict[str, Any]:
+
+    def evaluate_image(self,
+                       image_path: str,
+                       user_request: str,
+                       algorithm_code: Optional[str] = None,
+                       search_results: Optional[str] = None) -> Dict[str, Any]:
         """
         评估图片质量
-        
-        注：当前OpenRouter上支持多模态的模型有限且需付费。
-        MVP阶段采用基于算法代码和需求的代码评估，同样有效。
-        
+
         Args:
             image_path: 图片路径
             user_request: 用户原始需求
             algorithm_code: 可选的算法代码
             search_results: 可选的搜索结果
-            
+
         Returns:
             评估结果字典
         """
-        print(f"[EvaluationAgent] 评估图片: {image_path}")
-        
-        # MVP阶段：直接使用代码评估
-        # 基于算法代码和用户需求的质量评估同样有效，无需完全依赖图片本身
-        return self.evaluate_code(
-            code=algorithm_code or "",
-            user_request=user_request,
-            search_results=search_results,
-            image_path=image_path
-        )
-    
-    def evaluate_code(self, 
-                     code: str, 
-                     user_request: str,
-                     search_results: Optional[str] = None,
-                     image_path: Optional[str] = None) -> Dict[str, Any]:
+        try:
+            # 构建评估 prompt
+            prompt_parts = [f"用户需求：{user_request}"]
+
+            if algorithm_code:
+                prompt_parts.append(f"使用的算法代码:\n{algorithm_code}")
+
+            if search_results:
+                prompt_parts.append(f"参考信息:\n{search_results}")
+
+            prompt_parts.append("请对这张生成的图片进行全面评估，包括技术质量、内容匹配度、艺术效果等方面。")
+
+            full_prompt = "\n\n".join(prompt_parts)
+
+            # 尝试使用多模态模型 (带图片)
+            try:
+                # 编码图片
+                image_base64 = self._encode_image(image_path)
+
+                response = self.client.chat.completions.create(
+                    model=self.model_multimodal,
+                    messages=[
+                        {"role": "system", "content": self.system_context},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": full_prompt},
+                                {"type": "image_url", "image_url": {
+                                    "url": f"data:image/png;base64,{image_base64}"}}
+                            ]
+                        }
+                    ],
+                    temperature=0.7,
+                    max_tokens=2000
+                )
+
+                # 检查是否支持图像输入
+                if isinstance(response, str) and 'No endpoints found that support image input' in response:
+                    raise ValueError("Model does not support image input")
+
+            except Exception as multimodal_error:
+                # 如果多模态失败，回退到纯文本评估 (只评估代码)
+                print(
+                    f"[EvaluationAgent] 多模态评估失败 ({multimodal_error}), 回退到代码评估...")
+                return self.evaluate_code(
+                    code=algorithm_code or "",
+                    user_request=user_request,
+                    search_results=search_results
+                )
+
+            # Check if response is a string (error case) or has choices attribute
+            if isinstance(response, str):
+                error_msg = f"API returned a string instead of response object: {response[:200]}"
+                print(f"[EvaluationAgent] {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "evaluation_text": f"评估失败：{error_msg}"
+                }
+
+            if not hasattr(response, 'choices') or not response.choices:
+                error_msg = f"API response has no choices attribute: {type(response)}"
+                print(f"[EvaluationAgent] {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg,
+                    "evaluation_text": f"评估失败：{error_msg}"
+                }
+
+            evaluation_text = response.choices[0].message.content
+
+            # 提取结构化评分和改进建议
+            score = self._extract_score(evaluation_text)
+            improvements = self._extract_improvements(evaluation_text)
+
+            print(
+                f"[EvaluationAgent] Evaluation completed - Score: {score}/10")
+
+            return {
+                "success": True,
+                "score": score,
+                "evaluation_text": evaluation_text,
+                "improvements": improvements,
+                "image_path": image_path
+            }
+
+        except Exception as e:
+            print(f"[EvaluationAgent] Error evaluating image: {e}")
+            # 最后回退方案：只评估代码
+            return self.evaluate_code(
+                code=algorithm_code or "",
+                user_request=user_request,
+                search_results=search_results
+            )
+
+    def evaluate_code(self,
+                      code: str,
+                      user_request: str,
+                      search_results: Optional[str] = None) -> Dict[str, Any]:
         """
         评估代码质量（不依赖图片）
-        
+
         Args:
             code: 生成的代码
             user_request: 用户原始需求
             search_results: 可选的搜索结果
-            image_path: 可选的输入图片路径（用于上下文）
-            
+
         Returns:
             评估结果字典
         """
@@ -149,14 +239,14 @@ class EvaluationAgent:
                 f"用户需求：{user_request}",
                 f"生成的代码:\n{code}"
             ]
-            
+
             if search_results:
                 prompt_parts.append(f"参考信息:\n{search_results}")
-            
+
             prompt_parts.append("请评估这段代码的质量，包括正确性、可读性、效率等方面。")
-            
+
             full_prompt = "\n\n".join(prompt_parts)
-            
+
             response = self.client.chat.completions.create(
                 model=self.model_text,  # 使用环境变量中的模型，默认使用免费的 OpenRouter 模型
                 messages=[
@@ -166,7 +256,7 @@ class EvaluationAgent:
                 temperature=0.7,
                 max_tokens=2000
             )
-            
+
             # Check if response is a string (error case) or has choices attribute
             if isinstance(response, str):
                 error_msg = f"API returned a string instead of response object: {response[:200]}"
@@ -176,7 +266,7 @@ class EvaluationAgent:
                     "error": error_msg,
                     "evaluation_text": f"代码评估失败：{error_msg}"
                 }
-            
+
             if not hasattr(response, 'choices') or not response.choices:
                 error_msg = f"API response has no choices attribute: {type(response)}"
                 print(f"[EvaluationAgent] {error_msg}")
@@ -185,15 +275,15 @@ class EvaluationAgent:
                     "error": error_msg,
                     "evaluation_text": f"代码评估失败：{error_msg}"
                 }
-            
+
             # Handle models that put content in reasoning field
             message = response.choices[0].message
             evaluation_text = message.content
-            
+
             # Some models (like nvidia/nemotron) may put content in reasoning field
             if evaluation_text is None and hasattr(message, 'reasoning') and message.reasoning:
                 evaluation_text = message.reasoning
-            
+
             if evaluation_text is None:
                 error_msg = f"API response has no content: {message}"
                 print(f"[EvaluationAgent] {error_msg}")
@@ -204,20 +294,21 @@ class EvaluationAgent:
                     "evaluation_text": f"代码评估失败：{error_msg}",
                     "improvements": ""
                 }
-            
+
             # 提取结构化评分和改进建议
             score = self._extract_score(evaluation_text)
             improvements = self._extract_improvements(evaluation_text)
-            
-            print(f"[EvaluationAgent] Code evaluation completed - Score: {score}/10")
-            
+
+            print(
+                f"[EvaluationAgent] Code evaluation completed - Score: {score}/10")
+
             return {
                 "success": True,
                 "score": score,
                 "evaluation_text": evaluation_text,
                 "improvements": improvements
             }
-            
+
         except Exception as e:
             print(f"[EvaluationAgent] Error evaluating code: {e}")
             return {

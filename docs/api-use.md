@@ -5,7 +5,7 @@
 
 ## 验证内容
 - openrouter API（qwen/qwen-turbo 模型）
-- openrouter API（bytedance-seed/seedream-4.5 模型）
+- openrouter API（qwen/qwen-vl-plus 模型）
 - tavily API
 
 ## 验证方式
@@ -18,9 +18,9 @@
 curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" -H "HTTP-Referer: https://openrouter.ai" -H "X-Title: Test" -H "Content-Type: application/json" -d '{"model": "qwen/qwen-turbo", "messages": [{"role": "user", "content": "ping"}]}' $OPENROUTER_BASE_URL/chat/completions
 ```
 
-#### openrouter bytedance-seed/seedream-4.5
+#### openrouter qwen/qwen-vl-plus
 ```
-curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" -H "HTTP-Referer: https://openrouter.ai" -H "X-Title: Test" -H "Content-Type: application/json" -d '{"model": "bytedance-seed/seedream-4.5", "messages": [{"role": "user", "content": "ping"}]}' $OPENROUTER_BASE_URL/chat/completions
+curl -s -H "Authorization: Bearer $OPENROUTER_API_KEY" -H "HTTP-Referer: https://openrouter.ai" -H "X-Title: Test" -H "Content-Type: application/json" -d '{"model": "qwen/qwen-vl-plus", "messages": [{"role": "user", "content": "ping"}]}' $OPENROUTER_BASE_URL/chat/completions
 ```
 
 #### tavily
@@ -30,7 +30,7 @@ curl -s -H "Authorization: Bearer $TAVILY_API_KEY" "https://api.tavily.com/v1/se
 
 ## 验证结果
 - openrouter API（qwen/qwen-turbo）返回正常回复，接口可用。
-- openrouter API（bytedance-seed/seedream-4.5）返回正常回复，接口可用。
+- openrouter API（qwen/qwen-vl-plus）返回正常回复，接口可用。
 - tavily API 返回正常，无报错，接口可用。
 
 ## 结论
