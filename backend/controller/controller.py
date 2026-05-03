@@ -85,7 +85,7 @@ class ControllerAgent:
                             input_image_path: Optional[str] = None,
                             enable_search: bool = True) -> Dict[str, Any]:
         """
-        处理用户请求的主流程
+        处理用户请求的主流程 - MVP版本，支持评分驱动的自动迭代
         
         Args:
             session_id: 会话 ID
@@ -103,17 +103,25 @@ class ControllerAgent:
         session["user_request"] = user_request
         session["input_image"] = input_image_path
         session["status"] = "processing"
-        session["iteration_count"] += 1
         
         result = {
             "session_id": session_id,
-            "iteration": session["iteration_count"],
+            "total_iterations": 0,
             "steps": []
         }
         
+        # MVP迭代控制参数
+        MAX_ITERATIONS = 3  # 最多迭代3次
+        SCORE_THRESHOLD_ACCEPT = 7  # 评分 >= 7 接受
+        SCORE_THRESHOLD_OPTIMIZE = 5  # 评分 < 5 放弃迭代
+        
+        current_score = 0
+        search_results = None
+        generated_code = None
+        
         try:
-            # Step 1: 检索相关信息 (可选)
-            if enable_search:
+            # Step 0: 仅在第一次迭代时执行搜索
+            if enable_search and not session.get("search_results"):
                 self.add_state_log(session_id, "RetrievalAgent", "search_start", "running",
                                   {"query": user_request})
                 
@@ -128,90 +136,163 @@ class ControllerAgent:
                     "agent": "RetrievalAgent",
                     "action": "search",
                     "status": "completed",
-                    "result": search_results
+                    "result": search_results[:500]  # 只返回部分搜索结果以减少输出
                 })
-            
-            # Step 2: 生成代码
-            self.add_state_log(session_id, "CodeGenerationAgent", "code_gen_start", "running",
-                              {"request": user_request[:100]})
-            
-            generated_code = self.code_generation_agent.generate_code(
-                user_request=user_request,
-                search_results=session.get("search_results"),
-                previous_code=session.get("generated_code"),
-                feedback=session["feedback_history"][-1] if session["feedback_history"] else None
-            )
-            
-            # 提取代码块
-            generated_code = self.code_generation_agent.extract_code_block(generated_code)
-            session["generated_code"] = generated_code
-            
-            self.add_state_log(session_id, "CodeGenerationAgent", "code_gen_complete", "success",
-                              {"code_preview": generated_code[:200] + "..."})
-            
-            result["steps"].append({
-                "agent": "CodeGenerationAgent",
-                "action": "generate_code",
-                "status": "completed",
-                "result": generated_code
-            })
-            
-            # Step 3: 执行代码
-            self.add_state_log(session_id, "ExecutionAgent", "execution_start", "running",
-                              {"input_image": input_image_path})
-            
-            output_filename = f"result_{session_id}_{session['iteration_count']}.png"
-            execution_result = self.execution_agent.execute_code(
-                code=generated_code,
-                input_image_path=input_image_path,
-                output_filename=output_filename
-            )
-            
-            session["execution_result"] = execution_result
-            
-            if execution_result["success"]:
-                self.add_state_log(session_id, "ExecutionAgent", "execution_complete", "success",
-                                  {"output_path": execution_result["output_path"]})
             else:
-                self.add_state_log(session_id, "ExecutionAgent", "execution_failed", "error",
-                                  {"error": execution_result["error"]})
+                search_results = session.get("search_results")
             
-            result["steps"].append({
-                "agent": "ExecutionAgent",
-                "action": "execute",
-                "status": "completed" if execution_result["success"] else "failed",
-                "result": execution_result
-            })
-            
-            # Step 4: 评估结果
-            self.add_state_log(session_id, "EvaluationAgent", "evaluation_start", "running")
-            
-            if execution_result["success"] and execution_result["output_path"]:
-                evaluation_result = self.evaluation_agent.evaluate_image(
-                    image_path=execution_result["output_path"],
+            # 自动迭代循环：评分驱动的多轮优化
+            iteration_count = 0
+            while iteration_count < MAX_ITERATIONS:
+                iteration_count += 1
+                session["iteration_count"] = iteration_count
+                result["total_iterations"] = iteration_count
+                
+                print(f"\n[Controller] === 迭代第 {iteration_count} 次 ===")
+                
+                # Step 1: 生成代码（带迭代信息）
+                self.add_state_log(session_id, "CodeGenerationAgent", f"code_gen_start_{iteration_count}", "running",
+                                  {"iteration": iteration_count, "previous_score": current_score})
+                
+                iteration_info = {
+                    "iteration_count": iteration_count,
+                    "previous_score": current_score if iteration_count > 1 else None,
+                    "improvements": session.get("last_improvements", "")
+                }
+                
+                generated_code = self.code_generation_agent.generate_code(
                     user_request=user_request,
-                    algorithm_code=generated_code
+                    search_results=search_results,
+                    previous_code=session.get("generated_code") if iteration_count > 1 else None,
+                    iteration_info=iteration_info
                 )
-            else:
-                evaluation_result = self.evaluation_agent.evaluate_code(
+                
+                # 提取代码块
+                generated_code = self.code_generation_agent.extract_code_block(generated_code)
+                session["generated_code"] = generated_code
+                
+                self.add_state_log(session_id, "CodeGenerationAgent", f"code_gen_complete_{iteration_count}", "success",
+                                  {"code_preview": generated_code[:200] + "...", "iteration": iteration_count})
+                
+                result["steps"].append({
+                    "agent": "CodeGenerationAgent",
+                    "iteration": iteration_count,
+                    "action": "generate_code",
+                    "status": "completed",
+                    "result": generated_code[:1000]  # 限制代码长度在输出中
+                })
+                
+                # Step 2: 执行代码
+                self.add_state_log(session_id, "ExecutionAgent", f"execution_start_{iteration_count}", "running",
+                                  {"input_image": input_image_path, "iteration": iteration_count})
+                
+                output_filename = f"result_{session_id}_{iteration_count}.png"
+                execution_result = self.execution_agent.execute_code(
                     code=generated_code,
-                    user_request=user_request
+                    input_image_path=input_image_path,
+                    output_filename=output_filename
                 )
+                
+                session["execution_result"] = execution_result
+                
+                if execution_result["success"]:
+                    self.add_state_log(session_id, "ExecutionAgent", f"execution_complete_{iteration_count}", "success",
+                                      {"output_path": execution_result["output_path"], "iteration": iteration_count})
+                else:
+                    self.add_state_log(session_id, "ExecutionAgent", f"execution_failed_{iteration_count}", "error",
+                                      {"error": execution_result["error"], "iteration": iteration_count})
+                
+                result["steps"].append({
+                    "agent": "ExecutionAgent",
+                    "iteration": iteration_count,
+                    "action": "execute",
+                    "status": "completed" if execution_result["success"] else "failed",
+                    "result": {
+                        "success": execution_result["success"],
+                        "output_path": execution_result.get("output_path"),
+                        "error": execution_result.get("error")
+                    }
+                })
+                
+                # Step 3: 评估结果
+                self.add_state_log(session_id, "EvaluationAgent", f"evaluation_start_{iteration_count}", "running",
+                                  {"iteration": iteration_count})
+                
+                if execution_result["success"] and execution_result["output_path"]:
+                    evaluation_result = self.evaluation_agent.evaluate_image(
+                        image_path=execution_result["output_path"],
+                        user_request=user_request,
+                        algorithm_code=generated_code
+                    )
+                else:
+                    evaluation_result = self.evaluation_agent.evaluate_code(
+                        code=generated_code,
+                        user_request=user_request
+                    )
+                
+                session["evaluation_result"] = evaluation_result
+                
+                # 提取评分和改进建议（MVP核心）
+                current_score = evaluation_result.get("score", 0)
+                improvements = evaluation_result.get("improvements", "")
+                session["last_score"] = current_score
+                session["last_improvements"] = improvements
+                
+                self.add_state_log(session_id, "EvaluationAgent", f"evaluation_complete_{iteration_count}", "success",
+                                  {
+                                      "score": current_score,
+                                      "iteration": iteration_count,
+                                      "evaluation_preview": evaluation_result.get("evaluation_text", "")[:200]
+                                  })
+                
+                result["steps"].append({
+                    "agent": "EvaluationAgent",
+                    "iteration": iteration_count,
+                    "action": "evaluate",
+                    "status": "completed",
+                    "result": {
+                        "score": current_score,
+                        "evaluation_text": evaluation_result.get("evaluation_text", ""),
+                        "improvements": improvements
+                    }
+                })
+                
+                print(f"[Controller] 第 {iteration_count} 次迭代 - 评分: {current_score}/10")
+                
+                # MVP决策逻辑：根据评分自动决定是否继续迭代
+                if current_score >= SCORE_THRESHOLD_ACCEPT:
+                    print(f"[Controller] 评分达到 {current_score}/10 (≥ {SCORE_THRESHOLD_ACCEPT})，接受结果，迭代完成")
+                    session["status"] = "completed"
+                    result["success"] = True
+                    result["final_score"] = current_score
+                    result["iteration_reason"] = f"评分达到接受标准 ({current_score}/10 ≥ {SCORE_THRESHOLD_ACCEPT})"
+                    break
+                elif current_score >= SCORE_THRESHOLD_OPTIMIZE:
+                    if iteration_count < MAX_ITERATIONS:
+                        print(f"[Controller] 评分 {current_score}/10，继续优化... (第 {iteration_count}/{MAX_ITERATIONS} 次)")
+                        continue  # 继续迭代
+                    else:
+                        print(f"[Controller] 达到最大迭代次数 ({MAX_ITERATIONS})，停止迭代")
+                        session["status"] = "completed"
+                        result["success"] = True
+                        result["final_score"] = current_score
+                        result["iteration_reason"] = f"达到最大迭代次数，当前评分 {current_score}/10"
+                        break
+                else:
+                    print(f"[Controller] 评分过低 ({current_score}/10 < {SCORE_THRESHOLD_OPTIMIZE})，需人工审查")
+                    session["status"] = "needs_review"
+                    result["success"] = False
+                    result["final_score"] = current_score
+                    result["iteration_reason"] = f"评分过低，需人工审查 ({current_score}/10)"
+                    break
             
-            session["evaluation_result"] = evaluation_result
-            
-            self.add_state_log(session_id, "EvaluationAgent", "evaluation_complete", "success",
-                              {"evaluation_preview": evaluation_result.get("evaluation_text", "")[:200]})
-            
-            result["steps"].append({
-                "agent": "EvaluationAgent",
-                "action": "evaluate",
-                "status": "completed",
-                "result": evaluation_result
-            })
-            
-            session["status"] = "completed"
-            result["success"] = True
+            # 处理超过最大迭代次数的情况
+            if iteration_count >= MAX_ITERATIONS and session["status"] != "completed":
+                print(f"[Controller] 已完成最大迭代次数")
+                session["status"] = "completed"
+                result["success"] = True
+                result["final_score"] = current_score
+                result["iteration_reason"] = f"达到最大迭代次数，最终评分 {current_score}/10"
             
         except Exception as e:
             session["status"] = "error"

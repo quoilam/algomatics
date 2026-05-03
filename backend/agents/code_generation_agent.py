@@ -72,7 +72,7 @@ class CodeGenerationAgent:
                      user_request: str, 
                      search_results: Optional[str] = None,
                      previous_code: Optional[str] = None,
-                     feedback: Optional[str] = None) -> str:
+                     iteration_info: Optional[Dict[str, Any]] = None) -> str:
         """
         生成图像处理代码
         
@@ -80,7 +80,7 @@ class CodeGenerationAgent:
             user_request: 用户需求描述
             search_results: 可选的搜索结果作为外部知识
             previous_code: 可选的之前生成的代码
-            feedback: 可选的用户反馈
+            iteration_info: 可选的迭代信息，包含previous_score和improvements
             
         Returns:
             生成的代码
@@ -91,13 +91,21 @@ class CodeGenerationAgent:
         if search_results:
             prompt_parts.append(f"参考搜索结果:\n{search_results}\n")
         
+        if iteration_info:
+            if iteration_info.get("iteration_count", 0) > 1:
+                prompt_parts.append(f"[第 {iteration_info.get('iteration_count', 1)} 次迭代]")
+                prompt_parts.append(f"上一次评分: {iteration_info.get('previous_score', 'N/A')}/10")
+                if iteration_info.get("improvements"):
+                    prompt_parts.append(f"需要改进的方面:\n{iteration_info['improvements']}\n")
+        
         if previous_code:
             prompt_parts.append(f"之前生成的代码:\n{previous_code}\n")
         
-        if feedback:
-            prompt_parts.append(f"用户反馈:\n{feedback}\n")
-        
         prompt_parts.append(f"用户需求:\n{user_request}")
+        
+        # 如果是迭代，添加额外的指导
+        if iteration_info and iteration_info.get("iteration_count", 0) > 1:
+            prompt_parts.append("\n请基于上次的评价意见改进代码，重点关注需要改进的方面。")
         
         full_prompt = "\n\n".join(prompt_parts)
         
