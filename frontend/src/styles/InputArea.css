@@ -1,0 +1,244 @@
+/**
+ * InputArea 输入区域样式
+ */
+
+.input-area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  padding: var(--spacing-lg);
+  background-color: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.file-preview {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  animation: previewSlideIn 0.2s ease-out;
+}
+
+@keyframes previewSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.preview-content {
+  position: relative;
+  display: inline-block;
+}
+
+.preview-content img {
+  max-width: 80px;
+  max-height: 80px;
+  border-radius: var(--radius-md);
+  display: block;
+}
+
+.btn-remove-file {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background-color: var(--color-error);
+  color: white;
+  border: none;
+  border-radius: var(--radius-full);
+  font-size: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-base);
+}
+
+.btn-remove-file:hover {
+  background-color: #dc2626;
+  transform: scale(1.1);
+}
+
+.input-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-lg);
+  font-size: 13px;
+}
+
+.control-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-lg);
+}
+
+.control-right {
+  color: var(--color-text-tertiary);
+  font-size: 11px;
+}
+
+.file-input-label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  cursor: pointer;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  transition: all var(--transition-base);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+
+.file-input-label:hover:not(:has(input:disabled)) {
+  background-color: #f9fafb;
+  border-color: var(--color-primary);
+  color: var(--color-primary);
+}
+
+.file-input-label input {
+  display: none;
+}
+
+.file-input-btn {
+  white-space: nowrap;
+}
+
+.search-toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  cursor: pointer;
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-md);
+  transition: background-color var(--transition-base);
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+
+.search-toggle:hover:not(:has(input:disabled)) {
+  background-color: var(--color-bg);
+}
+
+.search-toggle input {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+.search-toggle input:checked {
+  background-color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.message-input {
+  width: 100%;
+  min-height: 80px;
+  padding: var(--spacing-md);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: 14px;
+  resize: vertical;
+  transition: border-color var(--transition-base);
+}
+
+.message-input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(43, 110, 246, 0.1);
+}
+
+.message-input:disabled {
+  background-color: var(--color-border-light);
+  cursor: not-allowed;
+}
+
+.message-input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.input-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-md);
+}
+
+.btn-send {
+  background-color: var(--color-primary);
+  color: white;
+  padding: var(--spacing-md) var(--spacing-lg);
+  border: none;
+  border-radius: var(--radius-md);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--transition-base);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.btn-send:hover:not(:disabled) {
+  background-color: #1d4ed8;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.btn-send:disabled {
+  background-color: var(--color-border);
+  color: var(--color-text-tertiary);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .input-area {
+    padding: var(--spacing-md);
+  }
+
+  .input-controls {
+    flex-direction: column;
+    gap: var(--spacing-md);
+    align-items: flex-start;
+  }
+
+  .control-right {
+    align-self: flex-end;
+  }
+
+  .message-input {
+    min-height: 60px;
+  }
+
+  .btn-send {
+    width: 100%;
+    justify-content: center;
+  }
+}

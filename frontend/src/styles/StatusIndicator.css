@@ -1,0 +1,115 @@
+/**
+ * StatusIndicator 状态指示器样式
+ */
+
+.status-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  font-size: 13px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-full);
+  animation: statusPulse 2s infinite;
+}
+
+@keyframes statusPulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(0.8);
+  }
+}
+
+/* 成功状态 */
+.status-success {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.status-success .status-dot {
+  background-color: #10b981;
+  animation: none;
+}
+
+/* 处理中状态 */
+.status-processing {
+  background-color: #dbeafe;
+  color: #0c4a6e;
+}
+
+.status-processing .status-dot {
+  background-color: #3b82f6;
+}
+
+/* 错误状态 */
+.status-error {
+  background-color: #fee2e2;
+  color: #7f1d1d;
+}
+
+.status-error .status-dot {
+  background-color: #ef4444;
+  animation: none;
+}
+
+/* 警告状态 */
+.status-warning {
+  background-color: #fef3c7;
+  color: #78350f;
+}
+
+.status-warning .status-dot {
+  background-color: #f59e0b;
+  animation: none;
+}
+
+/* 默认状态 */
+.status-default {
+  background-color: var(--color-border-light);
+  color: var(--color-text-secondary);
+}
+
+.status-default .status-dot {
+  background-color: var(--color-text-tertiary);
+  animation: none;
+}
+
+.status-text {
+  display: inline;
+}
+
+.agent-info {
+  display: flex;
+  gap: var(--spacing-md);
+  align-items: center;
+  padding-left: var(--spacing-md);
+  border-left: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.agent-name {
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.action-name {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}

@@ -1,0 +1,237 @@
+/**
+ * StateLogItem 状态日志项样式
+ */
+
+.state-log-item {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg);
+  overflow: hidden;
+  transition: all var(--transition-base);
+  animation: logAppear 0.3s ease-out;
+}
+
+@keyframes logAppear {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.state-log-item.status-success {
+  border-left: 3px solid var(--color-success);
+}
+
+.state-log-item.status-processing,
+.state-log-item.status-default {
+  border-left: 3px solid var(--color-info);
+}
+
+.state-log-item.status-error {
+  border-left: 3px solid var(--color-error);
+}
+
+.state-log-item.status-warning {
+  border-left: 3px solid var(--color-warning);
+}
+
+.log-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--spacing-md);
+  cursor: pointer;
+  background-color: var(--color-bg);
+  transition: background-color var(--transition-base);
+}
+
+.log-header:hover {
+  background-color: #f9fafb;
+}
+
+.log-left {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex: 1;
+  min-width: 0;
+}
+
+.log-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: currentColor;
+  flex-shrink: 0;
+}
+
+.state-log-item.status-success .log-status-dot {
+  background-color: var(--color-success);
+}
+
+.state-log-item.status-processing .log-status-dot,
+.state-log-item.status-default .log-status-dot {
+  background-color: var(--color-info);
+  animation: pulse 1.5s infinite;
+}
+
+.state-log-item.status-error .log-status-dot {
+  background-color: var(--color-error);
+}
+
+.state-log-item.status-warning .log-status-dot {
+  background-color: var(--color-warning);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.log-titles {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  min-width: 0;
+}
+
+.log-agent {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-action {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.log-right {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex-shrink: 0;
+}
+
+.log-time {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  white-space: nowrap;
+}
+
+.log-status {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+  text-transform: uppercase;
+}
+
+.log-status.status-success {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.log-status.status-processing,
+.log-status.status-default {
+  background-color: #dbeafe;
+  color: #0c4a6e;
+}
+
+.log-status.status-error {
+  background-color: #fee2e2;
+  color: #7f1d1d;
+}
+
+.log-status.status-warning {
+  background-color: #fef3c7;
+  color: #78350f;
+}
+
+.expand-icon {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  transition: transform var(--transition-base);
+}
+
+.log-body {
+  padding: var(--spacing-md) var(--spacing-lg);
+  border-top: 1px solid var(--color-border);
+  background-color: #fafbfc;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+  animation: bodySlideDown 0.2s ease-out;
+}
+
+@keyframes bodySlideDown {
+  from {
+    opacity: 0;
+    max-height: 0;
+  }
+  to {
+    opacity: 1;
+    max-height: 1000px;
+  }
+}
+
+.data-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  font-size: 12px;
+}
+
+.data-field strong {
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.data-field span,
+.data-field code {
+  color: var(--color-text-secondary);
+  word-break: break-all;
+}
+
+.data-field.code-field pre {
+  background-color: var(--color-bg);
+  border: 1px solid var(--color-border);
+  padding: var(--spacing-md);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  font-size: 11px;
+  line-height: 1.4;
+  font-family: 'Courier New', monospace;
+  margin: var(--spacing-xs) 0;
+}
+
+.data-field.path-field code {
+  background-color: var(--color-border-light);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-family: 'Courier New', monospace;
+  color: #374151;
+}
+
+.data-field.image-field {
+  gap: var(--spacing-md);
+}
+
+.data-field.image-field img {
+  max-width: 100%;
+  max-height: 300px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background-color: white;
+}

@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LLM 对话 UI</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>智能对话</h1>
+      <div class="session-controls">
+        <button id="create-session">创建会话</button>
+        <span id="session-id">未连接</span>
+      </div>
+    </header>
+
+    <main>
+      <div id="messages" class="messages"></div>
+      <section id="state-logs" class="state-logs">
+        <h2>步骤日志（实时）</h2>
+        <div id="logs-container" class="logs-container"></div>
+      </section>
+
+      <form id="chat-form" class="chat-form">
+        <input type="file" id="image" name="image" accept="image/*">
+        <label>
+          <input type="checkbox" id="enable-search" checked>
+          启用检索
+        </label>
+        <textarea id="request" placeholder="输入你的问题或指令..." rows="3"></textarea>
+        <div class="controls">
+          <button type="button" id="send">发送</button>
+          <button type="button" id="clear">清空</button>
+        </div>
+      </form>
+    </main>
+
+    <footer>
+      <small>本演示连接到后端 API: <code>/api/process</code></small>
+    </footer>
+  </div>
+
+  <script src="/static/chat.js"></script>
+</body>
+</html>
