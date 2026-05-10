@@ -50,3 +50,13 @@ backend/output_images/
 backend/uploads/
 
 .python-version
+.claude
+
+# Node modules (root)
+node_modules/
+
+# Session data (runtime)
+backend/sessions/
+
+# Uploaded files (runtime)
+uploads/
