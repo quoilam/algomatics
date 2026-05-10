@@ -146,6 +146,19 @@ def test_mvp_iteration():
                 else:
                     print(f"  - {agent} (迭代 {iteration}): {status}")
 
+            # 验证阶段3：任务解析与策略规划
+            session = controller.get_session(session_id)
+            task_parse = session.get("task_parse", {})
+            execution_plan = session.get("execution_plan", {})
+            print(f"\n📋 阶段3 - 任务解析与策略规划:")
+            print(f"  - 任务类型: {task_parse.get('task_type', 'N/A')}")
+            print(f"  - 执行策略: {execution_plan.get('strategy', 'N/A')}")
+            print(f"  - 启用搜索: {execution_plan.get('enable_search', 'N/A')}")
+            print(f"  - 启用迭代: {execution_plan.get('enable_iteration', 'N/A')}")
+            print(f"  - 最大迭代: {execution_plan.get('max_iterations', 'N/A')}")
+            has_planning = bool(task_parse) and bool(execution_plan)
+            print(f"  ✓ 任务规划已激活: {has_planning}")
+
             # 验证MVP关键指标
             print("\n✅ MVP验收标准:")
 
@@ -153,8 +166,8 @@ def test_mvp_iteration():
             has_iterations = result.get('total_iterations', 0) > 0
             print(f"  ✓ 自动迭代能力: {has_iterations}")
 
-            # 2. 迭代次数可控
-            max_iterations = 3
+            # 2. 迭代次数可控 (不超过策略上限)
+            max_iterations = execution_plan.get('max_iterations', 3)
             iterations_controlled = result.get(
                 'total_iterations', 0) <= max_iterations
             print(f"  ✓ 迭代次数可控 (≤ {max_iterations}): {iterations_controlled}")
@@ -179,7 +192,8 @@ def test_mvp_iteration():
             test_passed = (
                 has_iterations and
                 iterations_controlled and
-                score_based_decision
+                score_based_decision and
+                has_planning
             )
 
             if test_passed:
