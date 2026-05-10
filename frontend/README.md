@@ -54,6 +54,16 @@ pnpm dev
 
 访问 http://localhost:5173
 
+### 配置后端地址
+
+前端默认请求 `http://127.0.0.1:5008/api`。如果你的后端不是这个地址，请在 `frontend/.env` 中配置：
+
+```bash
+VITE_API_BASE_URL=http://127.0.0.1:5008
+```
+
+如果后端部署到了其他主机，只要把上面的值改成对应的后端 origin 即可，前端会自动拼接 `/api`。
+
 ### 生产构建
 ```bash
 pnpm build
