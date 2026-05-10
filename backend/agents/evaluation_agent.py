@@ -408,3 +408,99 @@ SCORE: X/10
                 "evaluation_text": f"代码评估失败：{str(e)}",
                 "improvements": ""
             }
+
+    # ── Stage 4: 轻量级前置评估 ─────────────────────────────
+
+    def pre_evaluate_code(self, code: str, user_request: str) -> Dict[str, Any]:
+        """
+        快速预评估代码（不执行），秒级完成。
+
+        检查:
+        - Python 语法正确性 (compile)
+        - 必要的变量使用 (input_image_path, output_path)
+        - 常用库导入 (cv2, PIL, numpy)
+        - 输出保存逻辑
+
+        Returns:
+            {
+                "quick_score": float 0-10,
+                "issues": [str],
+                "suggestion": str,
+                "should_revise": bool,
+                "checks": dict
+            }
+        """
+        issues = []
+        checks = {
+            "syntax_ok": True,
+            "has_input_var": False,
+            "has_output_var": False,
+            "has_output_save": False,
+            "has_imports": False,
+        }
+
+        # 1. 语法检查
+        try:
+            compile(code, "<generated_code>", "exec")
+        except SyntaxError as e:
+            checks["syntax_ok"] = False
+            issues.append(f"语法错误: {e}")
+
+        # 2. 变量检查
+        if "input_image_path" in code:
+            checks["has_input_var"] = True
+        else:
+            issues.append("未使用 input_image_path 变量读取输入图片")
+
+        if "output_path" in code:
+            checks["has_output_var"] = True
+        else:
+            issues.append("未使用 output_path 变量保存输出图片")
+
+        # 3. 输出保存逻辑
+        save_patterns = [".save(", "cv2.imwrite(", "imwrite("]
+        if any(p in code for p in save_patterns):
+            checks["has_output_save"] = True
+        else:
+            issues.append("未检测到图片保存逻辑 (.save / cv2.imwrite)")
+
+        # 4. 导入检查
+        import_keywords = ["import cv2", "import cv ", "from PIL",
+                           "import PIL", "import numpy", "from numpy"]
+        if any(kw in code for kw in import_keywords):
+            checks["has_imports"] = True
+        else:
+            issues.append("未检测到图像处理库导入 (cv2/PIL/numpy)")
+
+        # 5. 计算快速评分
+        total_checks = len(checks)
+        passed = sum(1 for v in checks.values() if v)
+        base_score = (passed / total_checks) * 10
+
+        # 严重问题扣分
+        if not checks["syntax_ok"]:
+            base_score = min(base_score, 3)
+        if not checks["has_output_save"]:
+            base_score = min(base_score, 4)
+
+        quick_score = round(base_score, 1)
+
+        should_revise = quick_score < 4 or len(issues) >= 2
+
+        suggestion = ""
+        if issues:
+            suggestion = "；".join(issues)
+            suggestion += "。建议修改后再执行。"
+
+        print(
+            f"[EvaluationAgent] Pre-evaluation: score={quick_score}/10, "
+            f"issues={len(issues)}, should_revise={should_revise}"
+        )
+
+        return {
+            "quick_score": quick_score,
+            "issues": issues,
+            "suggestion": suggestion,
+            "should_revise": should_revise,
+            "checks": checks,
+        }

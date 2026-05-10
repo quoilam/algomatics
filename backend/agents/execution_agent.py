@@ -39,7 +39,9 @@ class ExecutionAgent:
     def execute_code(self,
                      code: str,
                      input_image_path: Optional[str] = None,
-                     output_filename: str = "result.png") -> Dict[str, Any]:
+                     output_filename: str = "result.png",
+                     output_dir: Optional[str] = None,
+                     work_dir: Optional[str] = None) -> Dict[str, Any]:
         """
         执行生成的代码
 
@@ -47,11 +49,20 @@ class ExecutionAgent:
             code: 要执行的 Python 代码
             input_image_path: 可选的输入图片路径
             output_filename: 输出文件名
+            output_dir: 可选的会话输出目录
+            work_dir: 可选的会话代码工作目录
 
         Returns:
             执行结果字典
         """
-        output_path = os.path.join(self.output_dir, output_filename)
+        active_output_dir = output_dir or self.output_dir
+        os.makedirs(active_output_dir, exist_ok=True)
+        if work_dir:
+            os.makedirs(work_dir, exist_ok=True)
+        output_path = os.path.abspath(
+            os.path.join(active_output_dir, output_filename))
+        if input_image_path:
+            input_image_path = os.path.abspath(input_image_path)
 
         # 准备执行环境
         env = {
@@ -91,7 +102,14 @@ class ExecutionAgent:
 
             # 执行代码
             execution_log.append("执行算法代码...")
-            exec(code, env)
+            previous_cwd = os.getcwd()
+            try:
+                if work_dir:
+                    os.chdir(work_dir)
+                    execution_log.append(f"使用会话工作区：{work_dir}")
+                exec(code, env)
+            finally:
+                os.chdir(previous_cwd)
 
             # 检查是否生成了输出图片
             if os.path.exists(output_path):
