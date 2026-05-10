@@ -38,7 +38,14 @@ class EvaluationAgent:
 3. 艺术效果：美感、创意性等（1-10分）
 4. 处理效果：算法处理是否到位，有无明显瑕疵（1-10分）
 
-**重要**：请按以下格式返回评估结果，确保包含数值评分：
+评估时必须优先对齐用户的原始任务目标。比如用户要求高斯模糊时，细节变模糊本身不是缺陷；
+用户要求锐化时，边缘增强才是正向信号。不要用通用清晰度指标反向惩罚目标效果。
+对于“边缘检测后与原图拼合/叠加”类任务，需要检查非边缘区域是否仍保留原图亮度和色彩。
+如果结果因为全局混合黑底边缘图而整体变灰或变暗，应明确指出这是拼合策略问题，并建议使用边缘 mask 局部叠加。
+
+**重要**：请严格按以下格式返回评估结果，第一行必须包含机器可解析的评分标识：
+
+SCORE: X/10
 
 ## 总体评分：X/10
 
@@ -52,7 +59,7 @@ class EvaluationAgent:
 列出3个主要优点
 
 ## 需要改进的方面
-列出3个主要改进方面，并提供具体建议
+列出3个主要改进方面，并提供可直接指导代码修改的具体建议
 
 ## 整体评语
 一句话总结整体质量
@@ -65,43 +72,110 @@ class EvaluationAgent:
         return image_data
 
     def _extract_score(self, text: str) -> int:
-        """从评估文本中提取总体评分 (0-10)"""
-        # 查找 "总体评分：X/10" 的格式
-        match = re.search(
-            r'总体评分[:：]\s*(\d+(?:\.\d+)?)\s*/?10?', text, re.IGNORECASE)
-        if match:
-            try:
-                score = float(match.group(1))
-                return min(10, max(0, int(score)))
-            except (ValueError, IndexError):
-                pass
+        """从评估文本中提取总体评分 (0-10)，多模式回退"""
+        patterns = [
+            # 机器可解析格式: SCORE: X/10
+            r'SCORE[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            # 中文格式: 总体评分：X/10
+            r'总体评分[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            # 英文格式: Overall Score: X/10 或 Score: X/10
+            r'(?:Overall\s+)?Score[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            # 综合评分：X/10
+            r'综合评分[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            # labeled score patterns
+            r'(?:得分|评分|score)\s*[:：]?\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text, re.IGNORECASE)
+            if match:
+                try:
+                    score = float(match.group(1))
+                    return min(10, max(0, int(round(score))))
+                except (ValueError, IndexError):
+                    continue
 
-        # 如果找不到，尝试其他评分格式
-        matches = re.findall(r'(\d+)\s*/?10', text)
+        # 回退: 尝试维度评分计算平均分
+        dimension_scores = self._extract_dimension_scores(text)
+        if dimension_scores:
+            avg = sum(dimension_scores) / len(dimension_scores)
+            print(f"[EvaluationAgent] No overall score found, using dimension average: {avg:.1f}/10")
+            return min(10, max(0, int(round(avg))))
+
+        # 最终回退: 搜索所有 X/10 模式取最后一个
+        matches = re.findall(r'(\d+(?:\.\d+)?)\s*/?\s*10', text)
         if matches:
             try:
-                return min(10, max(0, int(matches[0])))
+                return min(10, max(0, int(round(float(matches[-1])))))
             except (ValueError, IndexError):
                 pass
 
-        # 如果仍然找不到，返回5作为默认分数
+        print("[EvaluationAgent] WARNING: Could not extract any score from evaluation text, defaulting to 5")
         return 5
 
-    def _extract_improvements(self, text: str) -> str:
-        """从评估文本中提取改进建议"""
-        # 查找 "需要改进的方面" 部分
-        improvements_match = re.search(
-            r'(?:需要改进的方面|改进建议)[:\：](.*?)(?=##|$)',
-            text,
-            re.IGNORECASE | re.DOTALL
-        )
+    def _extract_dimension_scores(self, text: str) -> list:
+        """从评估文本中提取各维度评分，用于回退计算总体分"""
+        dimension_patterns = [
+            r'技术质量[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            r'内容匹配度[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            r'艺术效果[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            r'处理效果[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            r'正确性[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            r'可读性[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+            r'效率[:：]\s*(\d+(?:\.\d+)?)\s*/?\s*10',
+        ]
+        scores = []
+        for pattern in dimension_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for m in matches:
+                try:
+                    s = float(m)
+                    if 0 <= s <= 10:
+                        scores.append(s)
+                except (ValueError, TypeError):
+                    continue
+        return scores
 
-        if improvements_match:
-            improvements = improvements_match.group(1).strip()
-            # 限制长度
-            if len(improvements) > 500:
-                improvements = improvements[:500] + "..."
-            return improvements
+    def _extract_improvements(self, text: str) -> str:
+        """从评估文本中提取改进建议，多模式回退"""
+        header_patterns = [
+            r'需要改进的方面',
+            r'改进建议',
+            r'可改进之处',
+            r'改进方向',
+            r'建议改进',
+            r'优化建议',
+        ]
+        stop_headers = [
+            r'总体评分', r'维度评分', r'主要优点', r'整体评语',
+            r'Score', r'Strengths', r'Summary',
+            r'结论', r'总结',
+        ]
+
+        for header in header_patterns:
+            stop_alt = '|'.join(stop_headers)
+            pattern = (
+                r'(?:^|\n)\s*(?:#{1,6}\s*)?(?:' + header + r')\s*[:：]?\s*'
+                r'(.*?)'
+                r'(?=\n\s*(?:#{1,6}\s*)?(?:' + stop_alt + r')\s*[:：]?|\Z)'
+            )
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+            if match:
+                improvements = match.group(1).strip()
+                if len(improvements) > 50:
+                    if len(improvements) > 1000:
+                        improvements = improvements[:1000] + "..."
+                    return improvements
+
+        # 回退: 找所有列表项作为潜在改进建议
+        list_items = re.findall(
+            r'(?:^|\n)\s*(?:[-*]\s+|\d+[.)]\s+)(.*?)(?=\n\s*(?:[-*]\s+|\d+[.)]\s+|$))',
+            text, re.DOTALL
+        )
+        if list_items and len(list_items) >= 2:
+            improvements = '\n'.join(
+                f'- {item.strip()[:200]}' for item in list_items[:6])
+            if len(improvements) > 50:
+                return improvements
 
         return ""
 
@@ -132,7 +206,9 @@ class EvaluationAgent:
             if search_results:
                 prompt_parts.append(f"参考信息:\n{search_results}")
 
-            prompt_parts.append("请对这张生成的图片进行全面评估，包括技术质量、内容匹配度、艺术效果等方面。")
+            prompt_parts.append(
+                "请对这张生成的图片进行全面评估。评分和改进建议必须以用户需求为首要标准，"
+                "并在“需要改进的方面”中给出可直接指导下一轮代码修改的具体建议。")
 
             full_prompt = "\n\n".join(prompt_parts)
 
@@ -241,14 +317,30 @@ class EvaluationAgent:
             if search_results:
                 prompt_parts.append(f"参考信息:\n{search_results}")
 
-            prompt_parts.append("请评估这段代码的质量，包括正确性、可读性、效率等方面。")
+            prompt_parts.append(
+                "请评估这段代码的质量，包括正确性、可读性、效率等方面。"
+                "请在“需要改进的方面”中给出可直接指导下一轮代码修改的具体建议。")
 
             full_prompt = "\n\n".join(prompt_parts)
 
             response = self.client.chat.completions.create(
-                model=self.model_text,  # 使用环境变量中的模型，默认使用免费的 OpenRouter 模型
+                model=self.model_text,
                 messages=[
-                    {"role": "system", "content": "你是一个专业的代码审查专家。"},
+                    {"role": "system", "content": (
+                        "你是一个专业的代码审查专家。请严格按以下格式返回评估结果，第一行必须包含 SCORE: X/10。\n\n"
+                        "SCORE: X/10\n\n"
+                        "## 总体评分：X/10\n\n"
+                        "## 维度评分\n"
+                        "- 正确性：X/10\n"
+                        "- 可读性：X/10\n"
+                        "- 效率：X/10\n\n"
+                        "## 主要优点\n"
+                        "列出2-3个主要优点\n\n"
+                        "## 需要改进的方面\n"
+                        "列出2-3个主要改进方面，并提供可直接指导代码修改的具体建议\n\n"
+                        "## 整体评语\n"
+                        "一句话总结"
+                    )},
                     {"role": "user", "content": full_prompt}
                 ],
                 temperature=0.7,
