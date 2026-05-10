@@ -25,6 +25,8 @@ from agents.execution_agent import ExecutionAgent
 from session_resources import SessionResourceManager
 from controller.task_parser import TaskParser
 from controller.planning_engine import PlanningEngine
+from controller.collaboration_coordinator import CollaborationCoordinator
+from knowledge.knowledge_base import KnowledgeBase
 
 
 class ControllerAgent:
@@ -42,11 +44,43 @@ class ControllerAgent:
         self.task_parser = TaskParser()
         self.planning_engine = PlanningEngine()
 
+        # 初始化协作协调器 (Stage 4)
+        self.collaboration = CollaborationCoordinator()
+
+        # 初始化知识库 (Stage 5)
+        kb_path = os.path.join(session_root, "..", "knowledge_base.json")
+        self.knowledge_base = KnowledgeBase(storage_path=kb_path)
+
         # 会话状态管理
         self.sessions: Dict[str, Dict[str, Any]] = {}
+        self._load_existing_sessions(session_root)
 
         # 状态历史用于展示
         self.state_history: List[Dict[str, Any]] = []
+
+    def _load_existing_sessions(self, session_root: str):
+        """从磁盘加载已有会话，使历史记录在重启后仍然可用"""
+        sessions_dir = session_root
+        if not os.path.isdir(sessions_dir):
+            return
+        loaded = 0
+        for entry in os.listdir(sessions_dir):
+            session_dir = os.path.join(sessions_dir, entry)
+            if not os.path.isdir(session_dir):
+                continue
+            state_file = os.path.join(session_dir, "state.json")
+            if not os.path.isfile(state_file):
+                continue
+            try:
+                with open(state_file, "r", encoding="utf-8") as f:
+                    session_data = json.load(f)
+                if isinstance(session_data, dict):
+                    self.sessions[entry] = session_data
+                    loaded += 1
+            except (json.JSONDecodeError, IOError) as e:
+                print(f"[Controller] Failed to load session {entry}: {e}")
+        if loaded:
+            print(f"[Controller] Loaded {loaded} existing sessions from disk")
 
     def _persist_session(self, session_id: str):
         """Persist the current in-memory session snapshot."""
@@ -83,6 +117,44 @@ class ControllerAgent:
     def _is_code_generation_failure(self, code: str) -> bool:
         stripped = (code or "").strip()
         return stripped.startswith("# 代码生成失败") or stripped.startswith("代码生成失败")
+
+    def _summarize_approach(self, code: str, user_request: str) -> str:
+        """从代码中提取算法方案摘要，用于知识库记录"""
+        hints = []
+        code_lower = code.lower()
+        # 检测常见算法关键词
+        algorithm_keywords = [
+            ("gaussianblur", "高斯模糊"),
+            ("medianblur", "中值滤波"),
+            ("bilateralfilter", "双边滤波"),
+            ("canny", "Canny边缘检测"),
+            ("threshold", "二值化"),
+            ("adaptivethreshold", "自适应阈值"),
+            ("histogram", "直方图"),
+            ("equalizehist", "直方图均衡化"),
+            ("clahe", "CLAHE增强"),
+            ("sharpen", "锐化"),
+            ("filter2d", "卷积滤波"),
+            ("resize", "缩放"),
+            ("rotate", "旋转"),
+            ("crop", "裁剪"),
+            ("inpaint", "修复"),
+            ("morphology", "形态学操作"),
+            ("dilate", "膨胀"),
+            ("erode", "腐蚀"),
+            ("blend", "图像混合"),
+            ("addweighted", "加权叠加"),
+            ("convert(", "颜色空间转换"),
+            ("split(", "通道分离"),
+            ("merge(", "通道合并"),
+        ]
+        for keyword, label in algorithm_keywords:
+            if keyword in code_lower:
+                hints.append(label)
+
+        if hints:
+            return " + ".join(hints[:3])
+        return user_request[:80]
 
     def _append_message(self,
                         session_id: str,
@@ -138,13 +210,14 @@ class ControllerAgent:
         session["final_result"] = final_result
         session["final_score"] = final_result["score"]
 
-    def create_session(self, user_id: str = "default") -> str:
+    def create_session(self, user_id: str = "default", title: str = "") -> str:
         """创建新会话"""
         session_id = str(uuid.uuid4())
         resources = self._session_resources(session_id)
         self.resource_manager.link_latest_session(session_id)
         self.sessions[session_id] = {
             "user_id": user_id,
+            "title": title or "新对话",
             "created_at": datetime.now().isoformat(),
             "status": "initialized",
             "resources": resources,
@@ -160,6 +233,26 @@ class ControllerAgent:
         }
         self._persist_session(session_id)
         return session_id
+
+    def delete_session(self, session_id: str) -> bool:
+        """删除会话及其磁盘资源"""
+        if session_id not in self.sessions:
+            return False
+        del self.sessions[session_id]
+        import shutil
+        session_dir = os.path.join(
+            self.resource_manager.root_dir, session_id)
+        if os.path.isdir(session_dir):
+            shutil.rmtree(session_dir, ignore_errors=True)
+        return True
+
+    def rename_session(self, session_id: str, new_title: str) -> bool:
+        """重命名会话"""
+        if session_id not in self.sessions:
+            return False
+        self.sessions[session_id]["title"] = str(new_title)[:100]
+        self._persist_session(session_id)
+        return True
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
         """获取会话状态"""
@@ -334,6 +427,32 @@ class ControllerAgent:
         )
         self._persist_session(session_id)
 
+        # Stage 5: 知识库推荐 — 为新请求查找历史成功方案
+        kb_recommendations = self.knowledge_base.recommend(
+            user_request,
+            task_type=task_parse_result.get("task_type", ""),
+            max_results=3,
+        )
+        session["kb_recommendations"] = kb_recommendations
+        if kb_recommendations:
+            rec_text = "\n".join(
+                f"- {r['approach']}（相似度 {r['similarity']:.0%}，历史评分 {r['score']}/10，成功率 {r['success_rate']:.0%}）"
+                for r in kb_recommendations[:2]
+            )
+            emit_agent_update(
+                f"我从历史知识库中找到了 {len(kb_recommendations)} 个相关成功案例，会在代码生成时作为参考：\n{rec_text}",
+                agent_name="KnowledgeBase",
+                phase="recommendation",
+                metadata={"recommendations": kb_recommendations}
+            )
+        else:
+            emit_agent_update(
+                "知识库中暂未找到相似的历史成功案例，将从零开始构建处理方案。",
+                agent_name="KnowledgeBase",
+                phase="recommendation",
+                metadata={"query": user_request[:100]}
+            )
+
         current_score = 0
         # 多轮对话：将上一轮的分数作为上下文传递给第一轮代码生成
         followup_starting_score = session.get(
@@ -377,6 +496,16 @@ class ControllerAgent:
                     "queries_used": research_result["queries_used"],
                     "total_results": research_result["total_results"],
                 }
+
+                # Stage 4: 协作 — Retrieval 质量信号正式发送给 CodeGen
+                quality_msg = self.collaboration.send_quality_report(
+                    quality_score=research_result["quality_score"],
+                    verdict=research_result["quality_verdict"],
+                    should_skip=research_result["should_skip"],
+                    queries_used=research_result["queries_used"],
+                )
+                session.setdefault("collaboration_log", []).append(
+                    quality_msg.to_dict())
                 self._record_agent_call(
                     session_id,
                     "RetrievalAgent",
@@ -500,9 +629,25 @@ class ControllerAgent:
                     phase="action",
                     metadata=iteration_info
                 )
+                # 构建增强的 prompt 上下文（含 KB 推荐）
+                enhanced_search = search_results
+                if kb_recommendations and iteration_count == 1:
+                    kb_context = "\n\n## 知识库推荐（历史成功方案参考）\n"
+                    for i, rec in enumerate(kb_recommendations[:2], 1):
+                        kb_context += (
+                            f"{i}. {rec['approach']}\n"
+                            f"   历史评分: {rec['score']}/10，成功率: {rec['success_rate']:.0%}\n"
+                        )
+                        if rec.get("code_sample"):
+                            kb_context += f"   参考代码片段:\n```python\n{rec['code_sample'][:600]}\n```\n"
+                    if enhanced_search:
+                        enhanced_search = kb_context + "\n---\n" + enhanced_search
+                    else:
+                        enhanced_search = kb_context
+
                 generated_code = self.code_generation_agent.generate_code(
                     user_request=user_request,
-                    search_results=search_results,
+                    search_results=enhanced_search,
                     previous_code=session.get(
                         "generated_code") if iteration_count > 1 else None,
                     iteration_info=iteration_info,
@@ -590,6 +735,62 @@ class ControllerAgent:
                     result["iteration_reason"] = session["final_result"]["iteration_reason"]
                     self._persist_session(session_id)
                     break
+
+                # Stage 4: 代码生成后轻量级前置评估（避免执行明显有问题的代码）
+                if self.collaboration.is_scenario_enabled("pre_evaluation"):
+                    pre_eval = self.evaluation_agent.pre_evaluate_code(
+                        generated_code, user_request)
+                    pre_eval_msg = self.collaboration.send_pre_evaluation(
+                        code=generated_code,
+                        quick_score=pre_eval["quick_score"],
+                        issues=pre_eval["issues"],
+                        suggestion=pre_eval["suggestion"],
+                    )
+                    session.setdefault("collaboration_log", []).append(
+                        pre_eval_msg.to_dict())
+
+                    if pre_eval["should_revise"] and iteration_count == 1:
+                        emit_agent_update(
+                            f"前置评估发现代码有 {len(pre_eval['issues'])} 个问题（快速评分 {pre_eval['quick_score']}/10），"
+                            f"我会让 CodeGen Agent 修正后再执行。问题：{'；'.join(pre_eval['issues'][:3])}",
+                            agent_name="EvaluationAgent",
+                            phase="collaboration",
+                            metadata={"pre_eval": pre_eval}
+                        )
+                        # 请求 CodeGen 根据前置评估反馈修改代码
+                        revision_info = {
+                            "iteration_count": iteration_count,
+                            "previous_score": pre_eval["quick_score"],
+                            "improvements": pre_eval["suggestion"],
+                        }
+                        revised_code = self.code_generation_agent.generate_code(
+                            user_request=user_request,
+                            search_results=search_results,
+                            previous_code=generated_code,
+                            iteration_info=revision_info,
+                            retrieval_quality=session.get("research_meta")
+                        )
+                        revised_code = self.code_generation_agent.extract_code_block(
+                            revised_code)
+                        if not self._is_code_generation_failure(revised_code):
+                            generated_code = revised_code
+                            code_hash = self._hash_text(generated_code)
+                            session["generated_code"] = generated_code
+                            code_file = self.resource_manager.save_workspace_code(
+                                session_id, f"iteration_{iteration_count}_revised.py", generated_code)
+                            session["generated_code_path"] = code_file
+                            emit_agent_update(
+                                f"CodeGen 已根据前置评估反馈修正代码，现在执行修正后的版本。",
+                                agent_name="CodeGenerationAgent",
+                                phase="collaboration",
+                                metadata={"revised_code_length": len(generated_code)}
+                            )
+                        else:
+                            emit_agent_update(
+                                f"CodeGen 未能生成有效修正版，继续使用原代码执行。",
+                                agent_name="CodeGenerationAgent",
+                                phase="collaboration"
+                            )
 
                 # Step 2: 执行代码
                 self.add_state_log(session_id, "ExecutionAgent", f"execution_start_{iteration_count}", "running",
@@ -695,6 +896,17 @@ class ControllerAgent:
 
                 # 如果执行失败，尝试自动修复（阶段2：错误自修复能力）
                 if not execution_result["success"]:
+                    # Stage 4: 协作 — Execution 错误反馈给 CodeGen
+                    error_feedback_msg = self.collaboration.send_error_feedback(
+                        error_type=execution_result.get("error_type", "runtime_error"),
+                        error_message=execution_result.get("error", ""),
+                        error_context=execution_result.get("error_context", {}),
+                        repair_hints=execution_result.get(
+                            "repair_suggestion", {}).get("hints", []),
+                    )
+                    session.setdefault("collaboration_log", []).append(
+                        error_feedback_msg.to_dict())
+
                     MAX_REPAIR_ATTEMPTS = 3
                     repair_attempt = 0
                     repaired_success = False
@@ -1214,6 +1426,26 @@ class ControllerAgent:
                 result["iteration_reason"] = session["final_result"]["iteration_reason"]
                 self._persist_session(session_id)
 
+            # Stage 5: 知识库记录 — 成功后记录到 KB
+            final_score = result.get("final_score", 0)
+            if result.get("success") and final_score >= 5 and generated_code:
+                final_approach = self._summarize_approach(
+                    generated_code, user_request)
+                self.knowledge_base.record_success(
+                    user_request=user_request,
+                    approach=final_approach,
+                    score=final_score,
+                    code=generated_code,
+                )
+                if best_result and best_result.get("score", 0) >= 7:
+                    emit_agent_update(
+                        f"已将本次成功案例记录到知识库（评分 {final_score}/10），后续类似问题可直接参考。",
+                        agent_name="KnowledgeBase",
+                        phase="learn",
+                        metadata={"recorded_score": final_score,
+                                  "approach": final_approach[:100]}
+                    )
+
         except Exception as e:
             session["status"] = "error"
             session["error"] = str(e)
@@ -1282,6 +1514,20 @@ class ControllerAgent:
         if feedback_type == "reject" and suggestions:
             # 用户拒绝并提供建议，需要重新生成
             session["status"] = "iterating"
+
+            # Stage 5: 记录失败到知识库
+            final_score = session.get("final_score", 0)
+            generated_code = session.get("generated_code", "")
+            if final_score < 7 and generated_code:
+                approach = self._summarize_approach(
+                    generated_code, session.get("user_request", ""))
+                self.knowledge_base.record_failure(
+                    user_request=session.get("user_request", ""),
+                    approach=approach,
+                    score=final_score,
+                    reason=suggestions,
+                )
+
             self._persist_session(session_id)
             return {
                 "success": True,
@@ -1290,6 +1536,20 @@ class ControllerAgent:
             }
         elif feedback_type == "accept":
             session["status"] = "accepted"
+
+            # Stage 5: 用户确认接受，提升知识库评分
+            final_score = session.get("final_score", 0)
+            generated_code = session.get("generated_code", "")
+            if generated_code:
+                approach = self._summarize_approach(
+                    generated_code, session.get("user_request", ""))
+                self.knowledge_base.record_success(
+                    user_request=session.get("user_request", ""),
+                    approach=approach,
+                    score=max(final_score, 7),  # 用户接受视为至少 7 分
+                    code=generated_code,
+                )
+
             self._persist_session(session_id)
             return {
                 "success": True,
@@ -1362,5 +1622,7 @@ class ControllerAgent:
             "evaluation_result": session.get("evaluation_result"),
             "output_image": session.get("execution_result", {}).get("output_path") if session.get("execution_result", {}).get("success") else None,
             "feedback_history": session.get("feedback_history", []),
-            "state_logs": session.get("state_logs", [])
+            "state_logs": session.get("state_logs", []),
+            "collaboration_log": session.get("collaboration_log", []),
+            "kb_recommendations": session.get("kb_recommendations", []),
         }
