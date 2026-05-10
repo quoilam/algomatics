@@ -1,18 +1,37 @@
 import React, { useEffect } from 'react';
-import { useChatStore, generateIds } from './store';
-import { sendChatMessageStream, sendChatWithImage, createSession as createBackendSession } from './api';
+import { useChatStore } from './store';
+import { sendChatMessageStream, sendChatWithImage, createSession as createBackendSession, getSessionDetails, listSessions } from './api';
 import type { Message, StateLog } from './types';
 
 import Sidebar from './components/Sidebar';
 import ChatWindow from './components/ChatWindow';
-import StatePanel from './components/StatePanel';
 import InputArea from './components/InputArea';
 
 import './App.css';
 
+const readFileAsDataUrl = (file: File): Promise<string> => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result || ''));
+  reader.onerror = () => reject(reader.error || new Error('读取图片失败'));
+  reader.readAsDataURL(file);
+});
+
+const generateMessageId = () => 'msg_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+
+const normalizeMessageTimestamp = (timestamp: unknown) => {
+  if (typeof timestamp === 'number') {
+    return timestamp;
+  }
+
+  if (typeof timestamp === 'string') {
+    return Date.parse(timestamp) || Date.now();
+  }
+
+  return Date.now();
+};
+
 const App: React.FC = () => {
   const currentSessionId = useChatStore(state => state.currentSessionId);
-  const messages = useChatStore(state => state.messages);
   const isLoading = useChatStore(state => state.isLoading);
   
   const setIsLoading = useChatStore(state => state.setIsLoading);
@@ -22,19 +41,72 @@ const App: React.FC = () => {
   const clearStateLogs = useChatStore(state => state.clearStateLogs);
   const setSessionStatus = useChatStore(state => state.setSessionStatus);
   const createSessionLocal = useChatStore(state => state.createSession);
-  const loadFromLocalStorage = useChatStore(state => state.loadFromLocalStorage);
+  const replaceSessions = useChatStore(state => state.replaceSessions);
+  const hydrateSessionFromBackend = useChatStore(state => state.hydrateSessionFromBackend);
 
-  // 初始化：加载本地存储的会话
+  // 初始化：从后端加载会话列表和当前会话消息
   useEffect(() => {
-    loadFromLocalStorage();
+    let cancelled = false;
 
-    // 如果没有会话，创建一个
-    setTimeout(() => {
-      const store = useChatStore.getState();
-      if (!store.currentSessionId && store.sessions.length === 0) {
-        createSessionLocal('新对话');
+    const bootstrapSessions = async () => {
+      try {
+        const response = await listSessions();
+        if (cancelled) {
+          return;
+        }
+
+        if (response.success && response.sessions.length > 0) {
+          const backendSessions = response.sessions.map(session => ({
+            id: session.session_id,
+            title: session.title || session.user_request?.slice(0, 24) || `对话 ${new Date(session.created_at).toLocaleTimeString()}`,
+            createdAt: session.created_at,
+            updatedAt: session.updated_at,
+            messages: [],
+            status: session.status,
+            iterationCount: session.iteration_count || 0,
+            userRequest: session.user_request || undefined,
+            finalResponse: session.final_response || undefined,
+            messageCount: session.message_count || 0,
+          }));
+
+          const currentSessionId = useChatStore.getState().currentSessionId;
+          const resolvedCurrentSessionId = currentSessionId && backendSessions.some(session => session.id === currentSessionId)
+            ? currentSessionId
+            : backendSessions[0].id;
+
+          replaceSessions(backendSessions, resolvedCurrentSessionId);
+
+          const activeSessionId = resolvedCurrentSessionId || backendSessions[0].id;
+          if (activeSessionId) {
+            const sessionDetails = await getSessionDetails(activeSessionId);
+            if (!cancelled) {
+              hydrateSessionFromBackend(sessionDetails);
+            }
+          }
+          return;
+        }
+
+        // 没有现成会话，创建一个
+        const backendSessionId = await createBackendSession();
+        if (cancelled) {
+          return;
+        }
+
+        createSessionLocal('新对话', backendSessionId);
+        const sessionDetails = await getSessionDetails(backendSessionId);
+        if (!cancelled) {
+          hydrateSessionFromBackend(sessionDetails);
+        }
+      } catch (error) {
+        console.error('Failed to bootstrap backend sessions:', error);
       }
-    }, 100);
+    };
+
+    void bootstrapSessions();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // 键盘快捷键
@@ -43,7 +115,16 @@ const App: React.FC = () => {
       // Ctrl+K 创建新会话
       if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
         e.preventDefault();
-        createSessionLocal('新对话');
+        void (async () => {
+          try {
+            const backendSessionId = await createBackendSession();
+            createSessionLocal('新对话', backendSessionId);
+            const sessionDetails = await getSessionDetails(backendSessionId);
+            hydrateSessionFromBackend(sessionDetails);
+          } catch (error) {
+            console.error('Failed to create session:', error);
+          }
+        })();
       }
     };
 
@@ -57,27 +138,25 @@ const App: React.FC = () => {
       return;
     }
 
+    const imageUrl = file ? await readFileAsDataUrl(file) : null;
+
     // 添加用户消息
     const userMessage: Message = {
-      id: generateIds.message(),
+      id: generateMessageId(),
       role: 'user',
       content: message || (file ? `[上传图片: ${file.name}]` : ''),
       timestamp: Date.now(),
       status: 'sent',
+      imageUrl,
+      metadata: file ? {
+        filename: file.name,
+        size: file.size,
+        type: file.type,
+      } : undefined,
     };
     addMessage(userMessage);
 
-    // 添加助手消息占位符
-    const assistantMessageId = generateIds.message();
-    const assistantMessage: Message = {
-      id: assistantMessageId,
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      status: 'sending',
-      streaming: true,
-    };
-    addMessage(assistantMessage);
+    const assistantMessageId = generateMessageId();
 
     setIsLoading(true);
     clearStateLogs();
@@ -85,9 +164,56 @@ const App: React.FC = () => {
 
     try {
       let assistantContent = '';
+      let assistantMessageCreated = false;
 
-      const handleStreamMessage = (data: string) => {
-        assistantContent += data;
+      const upsertStreamMessage = (streamMessage: Message) => {
+        const exists = useChatStore.getState().messages.some(item => item.id === streamMessage.id);
+        if (exists) {
+          updateMessage(streamMessage.id, streamMessage);
+        } else {
+          addMessage(streamMessage);
+        }
+      };
+
+      const handleStreamMessage = (data: any) => {
+        if (data && typeof data === 'object') {
+          const content = data.content || data.text || data.delta || data.message || '';
+          if (!content) {
+            return;
+          }
+
+          const metadata = data.metadata || {};
+          if (metadata.kind === 'agent_update') {
+            upsertStreamMessage({
+              id: data.id || generateMessageId(),
+              role: (data.role || 'assistant') as Message['role'],
+              content,
+              timestamp: normalizeMessageTimestamp(data.timestamp),
+              status: (data.status || 'complete') as Message['status'],
+              metadata,
+              sessionId: data.sessionId || currentSessionId,
+            });
+            return;
+          }
+
+          assistantContent += content;
+        } else {
+          assistantContent += String(data || '');
+        }
+
+        if (!assistantMessageCreated) {
+          assistantMessageCreated = true;
+          addMessage({
+            id: assistantMessageId,
+            role: 'assistant',
+            content: assistantContent,
+            timestamp: Date.now(),
+            status: 'sending',
+            streaming: true,
+          });
+          return;
+        }
+
         updateMessage(assistantMessageId, {
           content: assistantContent,
           status: 'sending',
@@ -102,21 +228,64 @@ const App: React.FC = () => {
         setSessionStatus(status as any);
       };
 
-      const handleError = (error: string) => {
-        console.error('Error:', error);
-        updateMessage(assistantMessageId, {
-          content: assistantContent || `错误: ${error}`,
-          status: 'error',
-        });
-        setSessionStatus('error');
+      const handleSessionId = (sessionId: string) => {
+        if (sessionId && sessionId !== currentSessionId) {
+          createSessionLocal('新对话', sessionId);
+        }
       };
 
-      const handleComplete = () => {
+      const handleError = (error: string) => {
+        console.error('Error:', error);
+        const errorMessage: Partial<Message> = {
+          content: assistantContent || `错误: ${error}`,
+          status: 'error',
+          streaming: false,
+        };
+        if (assistantMessageCreated) {
+          updateMessage(assistantMessageId, errorMessage);
+        } else {
+          addMessage({
+            id: assistantMessageId,
+            role: 'assistant',
+            content: errorMessage.content || `错误: ${error}`,
+            timestamp: Date.now(),
+            status: 'error',
+            streaming: false,
+          });
+          assistantMessageCreated = true;
+        }
+        setSessionStatus('error');
         setIsLoading(false);
-        updateMessage(assistantMessageId, {
+      };
+
+      const handleComplete = (data?: any) => {
+        if (data?.final_response && !assistantContent.includes(data.final_response)) {
+          assistantContent += data.final_response;
+        }
+        if (!assistantContent && data?.iteration_reason) {
+          assistantContent = data.iteration_reason;
+        }
+        setIsLoading(false);
+        const completeMessage: Partial<Message> = {
+          content: assistantContent || '处理完成',
           status: 'complete',
           streaming: false,
-        });
+          outputImageUrl: data?.output_image_base64 || undefined,
+        };
+        if (assistantMessageCreated) {
+          updateMessage(assistantMessageId, completeMessage);
+        } else {
+          addMessage({
+            id: assistantMessageId,
+            role: 'assistant',
+            content: completeMessage.content || '处理完成',
+            timestamp: Date.now(),
+            status: 'complete',
+            streaming: false,
+            outputImageUrl: completeMessage.outputImageUrl,
+          });
+          assistantMessageCreated = true;
+        }
       };
 
       // 发送消息
@@ -131,6 +300,7 @@ const App: React.FC = () => {
           handleStatus,
           handleError,
           handleComplete,
+          handleSessionId,
         );
       } else {
         await sendChatMessageStream(
@@ -142,6 +312,7 @@ const App: React.FC = () => {
           handleStatus,
           handleError,
           handleComplete,
+          handleSessionId,
         );
       }
     } catch (error) {
@@ -167,7 +338,6 @@ const App: React.FC = () => {
       <div className="main-content">
         <div className="chat-area">
           <ChatWindow onCopy={handleCopyMessage} />
-          <StatePanel />
         </div>
         
         <InputArea

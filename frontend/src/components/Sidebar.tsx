@@ -4,7 +4,7 @@
 
 import React, { useState } from 'react';
 import { useChatStore } from '../store';
-import { createSession } from '../api';
+import { createSession, getSessionDetails, deleteSession as deleteBackendSession, renameSession as renameBackendSession } from '../api';
 import '../styles/Sidebar.css';
 
 const Sidebar: React.FC = () => {
@@ -12,6 +12,7 @@ const Sidebar: React.FC = () => {
   const currentSessionId = useChatStore(state => state.currentSessionId);
   const setCurrentSession = useChatStore(state => state.setCurrentSession);
   const createSessionLocal = useChatStore(state => state.createSession);
+  const hydrateSessionFromBackend = useChatStore(state => state.hydrateSessionFromBackend);
   const deleteSession = useChatStore(state => state.deleteSession);
   const renameSession = useChatStore(state => state.renameSession);
 
@@ -23,22 +24,38 @@ const Sidebar: React.FC = () => {
   const handleCreateSession = async () => {
     setIsCreating(true);
     try {
-      const sessionId = createSessionLocal('新对话');
-      // 可选：尝试创建后端会话
+      const sessionId = await createSession();
+      createSessionLocal('新对话', sessionId);
+
       try {
-        await createSession();
+        const sessionDetails = await getSessionDetails(sessionId);
+        hydrateSessionFromBackend(sessionDetails);
       } catch (e) {
-        console.warn('Failed to create backend session:', e);
+        console.warn('Failed to hydrate backend session:', e);
       }
     } finally {
       setIsCreating(false);
     }
   };
 
-  const handleDeleteSession = (sessionId: string, e: React.MouseEvent) => {
+  const handleSelectSession = async (sessionId: string) => {
+    setCurrentSession(sessionId);
+
+    try {
+      const sessionDetails = await getSessionDetails(sessionId);
+      hydrateSessionFromBackend(sessionDetails);
+    } catch (e) {
+      console.warn('Failed to load session details:', e);
+    }
+  };
+
+  const handleDeleteSession = async (sessionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (window.confirm('确定要删除这个会话吗？')) {
-      deleteSession(sessionId);
+      const ok = await deleteBackendSession(sessionId);
+      if (ok) {
+        deleteSession(sessionId);
+      }
     }
   };
 
@@ -48,9 +65,12 @@ const Sidebar: React.FC = () => {
     setRenameValue(title);
   };
 
-  const handleRenameSave = (sessionId: string) => {
+  const handleRenameSave = async (sessionId: string) => {
     if (renameValue.trim()) {
-      renameSession(sessionId, renameValue);
+      const ok = await renameBackendSession(sessionId, renameValue);
+      if (ok) {
+        renameSession(sessionId, renameValue);
+      }
     }
     setRenamingId(null);
     setRenameValue('');
@@ -121,7 +141,7 @@ const Sidebar: React.FC = () => {
             <div
               key={session.id}
               className={`session-item ${session.id === currentSessionId ? 'active' : ''}`}
-              onClick={() => setCurrentSession(session.id)}
+              onClick={() => handleSelectSession(session.id)}
             >
               {renamingId === session.id ? (
                 <div className="session-rename" onClick={e => e.stopPropagation()}>
@@ -140,7 +160,7 @@ const Sidebar: React.FC = () => {
                     <div className="session-title">{session.title}</div>
                     <div className="session-meta">
                       <span className="session-count">
-                        {session.messages.length} 消息
+                        {session.messageCount ?? 0} 消息
                       </span>
                       <span className="session-time">
                         {formatDate(session.updatedAt)}
@@ -171,7 +191,7 @@ const Sidebar: React.FC = () => {
       </div>
 
       <div className="sidebar-footer">
-        <small>LocalStorage 保存会话</small>
+        <small>后端存储会话</small>
       </div>
     </div>
   );
