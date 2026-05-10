@@ -54,6 +54,7 @@ class CodeGenerationAgent:
 7. 不要使用 input() 或 cv2.imshow() 等需要用户交互的函数
 8. 不要使用 ImageFilter 等未导入的模块，如果需要使用请先导入
 9. 直接使用 input_image_path 和 output_path 变量，不要重新赋值
+10. 对“边缘检测后与原图拼合/叠加”类任务，优先使用边缘 mask 或 alpha mask 只在边缘区域叠加效果，保留非边缘区域的原图亮度和色彩；不要把黑底/白底边缘图与整张原图全局 addWeighted，除非用户明确要求整体变暗或灰度化。
 """
 
         # 对话历史上下文
@@ -75,7 +76,8 @@ class CodeGenerationAgent:
                       user_request: str,
                       search_results: Optional[str] = None,
                       previous_code: Optional[str] = None,
-                      iteration_info: Optional[Dict[str, Any]] = None) -> str:
+                      iteration_info: Optional[Dict[str, Any]] = None,
+                      retrieval_quality: Optional[Dict[str, Any]] = None) -> str:
         """
         生成图像处理代码
 
@@ -84,12 +86,34 @@ class CodeGenerationAgent:
             search_results: 可选的搜索结果作为外部知识
             previous_code: 可选的之前生成的代码
             iteration_info: 可选的迭代信息，包含previous_score和improvements
+            retrieval_quality: 可选的检索质量信息，包含quality_score、should_skip等
 
         Returns:
             生成的代码
         """
         # 构建 prompt
         prompt_parts = []
+
+        # 注入检索质量感知指导
+        if retrieval_quality:
+            quality_score = retrieval_quality.get("quality_score")
+            should_skip = retrieval_quality.get("should_skip", False)
+            quality_verdict = retrieval_quality.get("quality_verdict", "")
+
+            if should_skip or (quality_score is not None and quality_score < 4):
+                prompt_parts.append(
+                    "⚠️ 检索资料质量较低，不建议作为代码生成依据。"
+                    "请减少对外部资料的依赖，更多依靠模型自身知识和标准库（cv2、PIL、numpy）来生成可靠代码。"
+                )
+            elif quality_score is not None and quality_score < 6:
+                prompt_parts.append(
+                    f"检索资料质量一般（{quality_score}/10），仅供参考。"
+                    "请选择性采纳其中的建议，优先使用成熟的算法实现。"
+                )
+            elif quality_score is not None and quality_score >= 7:
+                prompt_parts.append(
+                    f"检索资料质量较好（{quality_score}/10），可以充分参考其中的算法建议和实现要点。"
+                )
 
         if search_results:
             prompt_parts.append(f"参考搜索结果:\n{search_results}\n")
@@ -103,6 +127,10 @@ class CodeGenerationAgent:
                 if iteration_info.get("improvements"):
                     prompt_parts.append(
                         f"需要改进的方面:\n{iteration_info['improvements']}\n")
+                else:
+                    prompt_parts.append(
+                        "上一轮评估没有提供明确改进建议。请主动分析上版代码可能的不足，"
+                        "必须给出一个实质性变化，避免重复相同实现。\n")
 
         if previous_code:
             prompt_parts.append(f"之前生成的代码:\n{previous_code}\n")
@@ -111,7 +139,10 @@ class CodeGenerationAgent:
 
         # 如果是迭代，添加额外的指导
         if iteration_info and iteration_info.get("iteration_count", 0) > 1:
-            prompt_parts.append("\n请基于上次的评价意见改进代码，重点关注需要改进的方面。")
+            prompt_parts.append(
+                "\n请基于上次的评价意见改进代码，重点关注需要改进的方面。"
+                "如果没有明确评价意见，也必须改变一个有意义的处理策略或参数，并保持用户需求不变。"
+                "不要返回与之前生成的代码完全相同的实现。")
 
         full_prompt = "\n\n".join(prompt_parts)
 
