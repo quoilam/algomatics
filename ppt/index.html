@@ -87,6 +87,20 @@
       .flow .step{min-height:auto}.matrix{grid-template-columns:1fr 1fr}
       .image-frame{max-height:42vh}
     }
+    @page{size:16in 9in;margin:0}
+    @media print{
+      html,body{width:auto;height:auto;overflow:visible;background:var(--paper)}
+      body::before,.nav,.hint{display:none!important}
+      #deck{position:static;display:block;width:auto;height:auto;transform:none!important;transition:none!important}
+      .slide{
+        width:16in;height:9in;page-break-after:always;break-after:page;
+        padding:.48in .8in .62in;overflow:hidden;background:var(--paper);
+        -webkit-print-color-adjust:exact;print-color-adjust:exact;
+      }
+      .slide.dark{background:var(--ink)!important;color:var(--paper)!important}
+      .slide.accent{background:var(--accent)!important;color:var(--accent-on)!important}
+      .slide:last-child{page-break-after:auto;break-after:auto}
+    }
   </style>
 </head>
 <body>
@@ -322,8 +336,16 @@ sessions/latest -> 最近会话</div>
     const deck = document.getElementById('deck');
     const slides = Array.from(document.querySelectorAll('.slide'));
     const nav = document.getElementById('nav');
+    const params = new URLSearchParams(window.location.search);
+    const exportMode = params.get('export') === '1';
+    const initialSlide = Number.parseInt(params.get('slide') || '0', 10);
     let index = 0;
     let startX = null;
+    if (exportMode) {
+      deck.style.transition = 'none';
+      nav.style.display = 'none';
+      document.querySelector('.hint').style.display = 'none';
+    }
     slides.forEach((_, i) => {
       const dot = document.createElement('div');
       dot.className = 'dot';
@@ -352,7 +374,7 @@ sessions/latest -> 最近会话</div>
       if (Math.abs(delta) > 50) go(index + (delta < 0 ? 1 : -1));
       startX = null;
     }, {passive:true});
-    go(0);
+    go(Number.isFinite(initialSlide) ? initialSlide : 0);
   </script>
 </body>
 </html>
