@@ -58,6 +58,77 @@ class ControllerAgent:
         # 状态历史用于展示
         self.state_history: List[Dict[str, Any]] = []
 
+    def _migrate_old_session(self, session: Dict[str, Any]) -> Dict[str, Any]:
+        """Wrap legacy scalar fields into turn_1 if turns array is missing."""
+        if session.get("turns") is not None:
+            return session
+        # Build turn_1 from existing scalar fields
+        execution_result = session.get("execution_result")
+        turn1 = {
+            "turn_id": 1,
+            "user_request": session.get("user_request", ""),
+            "input_image": session.get("input_image"),
+            "input_source": "upload",
+            "input_from_turn": None,
+            "messages": session.get("messages", []),
+            "generated_code": session.get("generated_code"),
+            "code_path": session.get("generated_code_path"),
+            "execution_result": execution_result,
+            "evaluation_result": session.get("evaluation_result"),
+            "iterations": [],
+            "status": session.get("status", "completed"),
+            "created_at": session.get("created_at", datetime.now().isoformat()),
+        }
+        session["turns"] = [turn1]
+        session["current_turn_index"] = 1
+        return session
+
+    def _sync_computed_fields(self, session: Dict[str, Any]) -> None:
+        """Sync top-level fields from the latest turn for backward compatibility."""
+        turns = session.get("turns", [])
+        if not turns:
+            return
+        latest = turns[-1]
+        session["user_request"] = latest.get("user_request")
+        session["input_image"] = latest.get("input_image")
+        session["generated_code"] = latest.get("generated_code")
+        session["generated_code_path"] = latest.get("code_path")
+        session["execution_result"] = latest.get("execution_result")
+        session["evaluation_result"] = latest.get("evaluation_result")
+        session["status"] = latest.get("status", session.get("status"))
+        session["iteration_count"] = len(latest.get("iterations", []))
+
+    def _create_turn(self, session: Dict[str, Any], user_request: str,
+                     input_image: Optional[str], input_source: str = "upload",
+                     input_from_turn: Optional[int] = None) -> Dict[str, Any]:
+        """Create a new turn object and update session state."""
+        turn_id = session["current_turn_index"] + 1
+        turn = {
+            "turn_id": turn_id,
+            "user_request": user_request,
+            "input_image": input_image,
+            "input_source": input_source,
+            "input_from_turn": input_from_turn,
+            "messages": [],
+            "generated_code": None,
+            "code_path": None,
+            "execution_result": None,
+            "evaluation_result": None,
+            "iterations": [],
+            "status": "processing",
+            "created_at": datetime.now().isoformat(),
+        }
+        session["current_turn_index"] = turn_id
+        session["turns"].append(turn)
+        self._sync_computed_fields(session)
+        return turn
+
+    def _finalize_turn(self, session: Dict[str, Any], turn: Dict[str, Any],
+                       status: str = "completed") -> None:
+        """Mark a turn as finished and sync computed fields to session top-level."""
+        turn["status"] = status
+        self._sync_computed_fields(session)
+
     def _load_existing_sessions(self, session_root: str):
         """从磁盘加载已有会话，使历史记录在重启后仍然可用"""
         sessions_dir = session_root
@@ -75,6 +146,7 @@ class ControllerAgent:
                 with open(state_file, "r", encoding="utf-8") as f:
                     session_data = json.load(f)
                 if isinstance(session_data, dict):
+                    session_data = self._migrate_old_session(session_data)
                     self.sessions[entry] = session_data
                     loaded += 1
             except (json.JSONDecodeError, IOError) as e:
@@ -221,6 +293,9 @@ class ControllerAgent:
             "created_at": datetime.now().isoformat(),
             "status": "initialized",
             "resources": resources,
+            "turns": [],
+            "current_turn_index": 0,
+            # Computed fields (synced from latest turn for backward compat)
             "user_request": None,
             "input_image": None,
             "messages": [],
@@ -229,7 +304,7 @@ class ControllerAgent:
             "execution_result": None,
             "evaluation_result": None,
             "feedback_history": [],
-            "iteration_count": 0
+            "iteration_count": 0,
         }
         self._persist_session(session_id)
         return session_id
