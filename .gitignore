@@ -44,6 +44,8 @@ search_cache.json
 output_images/
 backend/output_images/
 *.png
+!ppt/images/
+!ppt/images/*.png
 
 .venv/
 .pytest_cache/

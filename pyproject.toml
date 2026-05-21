@@ -1,17 +1,17 @@
 [project]
-name = "impl"
+name = "algomatics"
 version = "0.1.0"
-description = "Add your description here"
+description = "Agentic image algorithm automation demo with LLM-driven planning, execution, evaluation, and iteration."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "dotenv>=0.9.9",
     "flask>=2.3.0",
     "matplotlib>=3.7.0",
     "numpy>=1.24.0",
     "openai>=1.0.0",
     "opencv-python>=4.8.0",
     "pillow>=10.0.0",
+    "python-dotenv>=1.0.0",
     "pytest>=9.0.3",
     "tavily>=0.3.0",
     "werkzeug>=2.3.0",
