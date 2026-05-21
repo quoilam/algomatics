@@ -3,7 +3,7 @@
 import json
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from werkzeug.utils import secure_filename
 
@@ -91,16 +91,22 @@ class SessionResourceManager:
         }
         self._append_jsonl(paths["agent_calls_file"], entry)
 
-    def save_workspace_code(self, session_id: str, filename: str, code: str) -> str:
+    def save_workspace_code(self, session_id: str, filename: str, code: str,
+                            turn_id: Optional[int] = None) -> str:
         paths = self.ensure_session(session_id)
         safe_filename = secure_filename(filename) or "generated_code.py"
         if not safe_filename.endswith(".py"):
             safe_filename = f"{safe_filename}.py"
+        if turn_id is not None:
+            safe_filename = f"turn_{turn_id}_{safe_filename}"
         file_path = os.path.join(paths["workspace_dir"], safe_filename)
-        with open(file_path, "w", encoding="utf-8") as file_handle:
-            file_handle.write(code)
-            if code and not code.endswith("\n"):
-                file_handle.write("\n")
+        try:
+            with open(file_path, "w", encoding="utf-8") as file_handle:
+                file_handle.write(code)
+                if code and not code.endswith("\n"):
+                    file_handle.write("\n")
+        except (IOError, OSError) as e:
+            print(f"[SessionResourceManager] Failed to save workspace code for {session_id}/{safe_filename}: {e}")
         return file_path
 
     def build_upload_path(self, session_id: str, filename: str) -> str:
@@ -111,6 +117,13 @@ class SessionResourceManager:
     def build_unique_upload_path(self, session_id: str, filename: str, suffix: str) -> str:
         safe_filename = secure_filename(filename) or "upload.bin"
         return self.build_upload_path(session_id, f"{suffix}_{safe_filename}")
+
+    def build_turn_output_dir(self, session_id: str, turn_id: int) -> str:
+        """Return the output directory for a specific turn, creating it if needed."""
+        paths = self.ensure_session(session_id)
+        turn_dir = os.path.join(paths["outputs_dir"], f"turn_{turn_id}")
+        os.makedirs(turn_dir, exist_ok=True)
+        return turn_dir
 
     @staticmethod
     def _append_jsonl(file_path: str, entry: Dict[str, Any]) -> None:
