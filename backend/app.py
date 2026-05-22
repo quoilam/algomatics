@@ -374,6 +374,19 @@ def _build_session_response(session_id: str):
         'collaboration_log': session.get('collaboration_log', []),
         'kb_recommendations': session.get('kb_recommendations', []),
         'resources': session.get('resources'),
+        'turns': [{
+            'turn_id': t['turn_id'],
+            'user_request': t.get('user_request', ''),
+            'input_source': t.get('input_source', 'upload'),
+            'input_from_turn': t.get('input_from_turn'),
+            'status': t.get('status', 'unknown'),
+            'output_path': (t.get('execution_result') or {}).get('output_path') if (t.get('execution_result') or {}).get('success') else None,
+            'output_image_base64': _encode_file_as_data_uri((t.get('execution_result') or {}).get('output_path')) if (t.get('execution_result') or {}).get('success') else None,
+            'score': (t.get('evaluation_result') or {}).get('score'),
+            'iteration_count': len(t.get('iterations', [])),
+            'created_at': _to_ms(t.get('created_at')),
+        } for t in session.get('turns', [])],
+        'current_turn_index': session.get('current_turn_index', 0),
     }
 
 
@@ -458,6 +471,57 @@ def rename_session(session_id):
     if not ok:
         return jsonify({'success': False, 'error': 'Session not found'}), 404
     return jsonify({'success': True, 'message': '会话已重命名'})
+
+
+@app.route('/api/session/<session_id>/turns', methods=['GET'])
+def list_turns(session_id):
+    """列出会话的所有 turn 摘要"""
+    session = controller.get_session(session_id)
+    if not session:
+        return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+    session = controller._migrate_old_session(session)
+    turns = session.get('turns', [])
+    summaries = []
+    for t in turns:
+        exec_result = t.get('execution_result') or {}
+        summaries.append({
+            'turn_id': t['turn_id'],
+            'user_request': t.get('user_request', ''),
+            'input_source': t.get('input_source', 'upload'),
+            'input_from_turn': t.get('input_from_turn'),
+            'status': t.get('status', 'unknown'),
+            'output_path': exec_result.get('output_path') if exec_result.get('success') else None,
+            'score': (t.get('evaluation_result') or {}).get('score'),
+            'iteration_count': len(t.get('iterations', [])),
+            'created_at': _to_ms(t.get('created_at')),
+        })
+    return jsonify({'success': True, 'turns': summaries})
+
+
+@app.route('/api/session/<session_id>/turns/<int:turn_id>', methods=['GET'])
+def get_turn_detail(session_id, turn_id):
+    """获取单个 turn 的完整详情"""
+    session = controller.get_session(session_id)
+    if not session:
+        return jsonify({'success': False, 'error': 'Session not found'}), 404
+
+    session = controller._migrate_old_session(session)
+    turns = session.get('turns', [])
+    turn = next((t for t in turns if t['turn_id'] == turn_id), None)
+    if not turn:
+        return jsonify({'success': False, 'error': 'Turn not found'}), 404
+
+    exec_result = turn.get('execution_result') or {}
+    output_path = exec_result.get('output_path') if exec_result.get('success') else None
+    return jsonify({
+        'success': True,
+        'turn': {
+            **turn,
+            'output_image_base64': _encode_file_as_data_uri(output_path) if output_path else None,
+            'input_image_base64': _encode_file_as_data_uri(turn.get('input_image')),
+        }
+    })
 
 
 @app.route('/api/stream', methods=['GET'])
