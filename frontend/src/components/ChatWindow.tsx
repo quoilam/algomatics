@@ -14,6 +14,7 @@ interface ChatWindowProps {
 
 const ChatWindow: React.FC<ChatWindowProps> = ({ onCopy }) => {
   const messages = useChatStore(state => state.messages);
+  const turns = useChatStore(state => state.turns);
   const stateLogs = useChatStore(state => state.stateLogs);
   const sessionStatus = useChatStore(state => state.sessionStatus);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -59,14 +60,39 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ onCopy }) => {
           </div>
 
           <div className="messages-container">
-            {messages.map(message => (
-              <MessageItem
-                key={message.id}
-                message={message}
-                onCopy={onCopy}
-                showDetails={false}
-              />
-            ))}
+            {messages.map((message, idx) => {
+              // Show turn divider when a user message matches a turn's request
+              const turnForMsg = turns.find(
+                t => t.user_request === message.content && message.role === 'user'
+              );
+              const prevMsg = idx > 0 ? messages[idx - 1] : null;
+              const isNewTurn = turnForMsg && (!prevMsg || prevMsg.role !== 'user' || prevMsg.content !== turnForMsg.user_request);
+
+              return (
+                <React.Fragment key={message.id}>
+                  {isNewTurn && turnForMsg && (
+                    <div className="turn-divider">
+                      <span className="turn-badge">第 {turnForMsg.turn_id} 轮</span>
+                      {turnForMsg.score != null && (
+                        <span className="turn-score">评分 {turnForMsg.score}/10</span>
+                      )}
+                      {turnForMsg.output_image_base64 && (
+                        <img
+                          className="turn-thumbnail"
+                          src={turnForMsg.output_image_base64}
+                          alt={`第 ${turnForMsg.turn_id} 轮输出`}
+                        />
+                      )}
+                    </div>
+                  )}
+                  <MessageItem
+                    message={message}
+                    onCopy={onCopy}
+                    showDetails={false}
+                  />
+                </React.Fragment>
+              );
+            })}
             <div ref={messagesEndRef} />
           </div>
         </section>

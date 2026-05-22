@@ -20,6 +20,8 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading = false 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentSessionId = useChatStore(state => state.currentSessionId);
+  const turns = useChatStore(state => state.turns);
+  const hasPriorOutput = turns.length > 0 && turns.some(t => t.output_path);
 
   const handleSendMessage = () => {
     if (!message.trim() && !selectedFile) {
@@ -137,6 +139,12 @@ const InputArea: React.FC<InputAreaProps> = ({ onSendMessage, isLoading = false 
         disabled={isLoading}
         rows={3}
       />
+
+      {hasPriorOutput && !selectedFile && (
+        <div className="input-source-indicator">
+          将基于上一轮输出图片继续处理（或上传新图片覆盖）
+        </div>
+      )}
 
       <div className="input-actions">
         <button

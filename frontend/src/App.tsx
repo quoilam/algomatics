@@ -58,7 +58,7 @@ const App: React.FC = () => {
         if (response.success && response.sessions.length > 0) {
           const backendSessions = response.sessions.map(session => ({
             id: session.session_id,
-            title: session.title || session.user_request?.slice(0, 24) || `对话 ${new Date(session.created_at).toLocaleTimeString()}`,
+            title: (session.title && session.title !== '新对话' ? session.title : '') || session.user_request?.slice(0, 24) || `对话 ${new Date(session.created_at).toLocaleTimeString()}`,
             createdAt: session.created_at,
             updatedAt: session.updated_at,
             messages: [],
@@ -258,7 +258,11 @@ const App: React.FC = () => {
         setIsLoading(false);
       };
 
-      const handleComplete = (data?: any) => {
+      const handleComplete = async (data?: any) => {
+        // Update session title if backend provided a meaningful one
+        if (data?.title && data.title !== '新对话') {
+          useChatStore.getState().renameSession(currentSessionId, data.title);
+        }
         if (data?.final_response && !assistantContent.includes(data.final_response)) {
           assistantContent += data.final_response;
         }
@@ -285,6 +289,13 @@ const App: React.FC = () => {
             outputImageUrl: completeMessage.outputImageUrl,
           });
           assistantMessageCreated = true;
+        }
+        // Refresh session to get updated turns
+        try {
+          const sessionDetails = await getSessionDetails(currentSessionId);
+          hydrateSessionFromBackend(sessionDetails);
+        } catch (err) {
+          console.error('Failed to refresh turns after completion:', err);
         }
       };
 

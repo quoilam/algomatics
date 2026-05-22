@@ -797,3 +797,45 @@
     justify-content: flex-start;
   }
 }
+
+/* --- turn divider styles --- */
+
+.turn-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  margin: 12px 0;
+  background: rgba(100, 100, 255, 0.08);
+  border-left: 3px solid #6c6cff;
+  border-radius: 0 8px 8px 0;
+}
+
+.turn-badge {
+  font-weight: 600;
+  font-size: 13px;
+  color: #6c6cff;
+  background: rgba(108, 108, 255, 0.12);
+  padding: 2px 10px;
+  border-radius: 12px;
+}
+
+.turn-score {
+  font-size: 12px;
+  color: #4caf50;
+}
+
+.turn-thumbnail {
+  max-height: 48px;
+  border-radius: 4px;
+}
+
+.input-source-indicator {
+  font-size: 12px;
+  color: #6c6cff;
+  background: rgba(108, 108, 255, 0.06);
+  padding: 4px 12px;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  text-align: center;
+}
