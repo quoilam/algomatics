@@ -333,6 +333,28 @@ export async function renameSession(sessionId: string, title: string): Promise<b
 }
 
 /**
+ * 获取会话的所有 turn 摘要
+ */
+export async function fetchTurns(sessionId: string): Promise<{ success: boolean; turns: import('./types').TurnSummary[] }> {
+  const response = await fetch(`${API_BASE}/session/${encodeURIComponent(sessionId)}/turns`);
+  if (!response.ok) {
+    throw new Error(`Fetch turns error: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
+/**
+ * 获取单个 turn 的完整详情（含 output_image_base64）
+ */
+export async function fetchTurnDetail(sessionId: string, turnId: number): Promise<{ success: boolean; turn: import('./types').Turn }> {
+  const response = await fetch(`${API_BASE}/session/${encodeURIComponent(sessionId)}/turns/${turnId}`);
+  if (!response.ok) {
+    throw new Error(`Fetch turn detail error: ${response.statusText}`);
+  }
+  return await response.json();
+}
+
+/**
  * 创建新会话
  */
 export async function createSession(): Promise<string> {

@@ -36,6 +36,8 @@ export interface Session {
   finalResponse?: string;
   iterationCount?: number;
   messageCount?: number;
+  turns?: TurnSummary[];
+  currentTurnIndex?: number;
 }
 
 export type StateLogStatus = 'started' | 'running' | 'completed' | 'failed' | 'paused';
@@ -55,6 +57,30 @@ export interface StateLog {
   output_image_base64?: string;
   input_image_base64?: string;
   input_image_path?: string;
+}
+
+export interface TurnSummary {
+  turn_id: number;
+  user_request: string;
+  input_source: 'upload' | 'previous_output';
+  input_from_turn: number | null;
+  status: string;
+  output_path: string | null;
+  output_image_base64?: string | null;
+  score: number | null;
+  iteration_count: number;
+  created_at: number;
+}
+
+export interface Turn extends TurnSummary {
+  input_image: string | null;
+  input_image_base64?: string | null;
+  messages: Message[];
+  generated_code: string | null;
+  code_path: string | null;
+  execution_result: Record<string, any> | null;
+  evaluation_result: Record<string, any> | null;
+  iterations: Array<Record<string, any>>;
 }
 
 export interface StreamMessage {
@@ -116,6 +142,8 @@ export interface SessionResponse {
   user_request?: string | null;
   iteration_count?: number;
   feedback_history?: Array<Record<string, any>>;
+  turns?: TurnSummary[];
+  current_turn_index?: number;
 }
 
 export interface SessionListResponse {
