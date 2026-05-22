@@ -10,6 +10,7 @@ import type {
   ViewMode,
   SessionStatus,
   SessionResponse,
+  TurnSummary,
 } from './types';
 
 interface ChatStore {
@@ -25,6 +26,10 @@ interface ChatStore {
   // UI 状态
   viewMode: ViewMode;
   isLoading: boolean;
+
+  // Turn state
+  turns: TurnSummary[];
+  activeTurnId: number | null;
 
   // 操作方法
   setCurrentSession: (sessionId: string) => void;
@@ -46,6 +51,8 @@ interface ChatStore {
   setSessionStatus: (status: SessionStatus) => void;
   setIsLoading: (loading: boolean) => void;
   setViewMode: (mode: ViewMode) => void;
+  setTurns: (turns: TurnSummary[]) => void;
+  setActiveTurnId: (turnId: number | null) => void;
 }
 
 const generateLogId = () => 'log_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
@@ -58,6 +65,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   sessionStatus: 'idle',
   viewMode: 'detailed',
   isLoading: false,
+  turns: [],
+  activeTurnId: null,
 
   setCurrentSession: (sessionId) => {
     const store = get();
@@ -128,6 +137,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       });
     }
 
+    // Capture turns from the session response
+    const turns = Array.isArray(session.turns) ? session.turns : [];
+
     const resolvedSession: Session = {
       id: session.session_id,
       title: session.title || session.user_request?.slice(0, 24) || `对话 ${new Date(session.created_at).toLocaleTimeString()}`,
@@ -158,6 +170,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         messages: isCurrent ? resolvedMessages : state.messages,
         stateLogs: isCurrent ? (session.state_logs || []) : state.stateLogs,
         sessionStatus: isCurrent ? session.status : state.sessionStatus,
+        turns: isCurrent ? turns : state.turns,
+        activeTurnId: isCurrent ? (turns.length > 0 ? turns[turns.length - 1].turn_id : null) : state.activeTurnId,
       };
     });
   },
@@ -291,5 +305,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   setViewMode: (mode) => {
     set({ viewMode: mode });
   },
+
+  setTurns: (turns) => set({ turns }),
+
+  setActiveTurnId: (turnId) => set({ activeTurnId: turnId }),
 
 }));
