@@ -120,7 +120,6 @@ class ControllerAgent:
         }
         session["current_turn_index"] = turn_id
         session["turns"].append(turn)
-        self._sync_computed_fields(session)
         return turn
 
     def _finalize_turn(self, session: Dict[str, Any], turn: Dict[str, Any],
@@ -413,27 +412,55 @@ class ControllerAgent:
             return {"success": False, "error": "Session not found"}
 
         session = self.sessions[session_id]
-        resources = session.get(
-            "resources") or self._session_resources(session_id)
+        session = self._migrate_old_session(session)
+        resources = session.get("resources") or self._session_resources(session_id)
         session["resources"] = resources
-        session["user_request"] = user_request
 
-        # 将用户消息追加到 messages 列表
-        self._append_message(session_id, "user", user_request, status="sent")
-
-        # 多轮对话：如果没有传入新图片，复用会话已有的 input_image
+        # Resolve input image: auto-link from previous turn's output
+        input_source = "upload"
+        input_from_turn = None
         if input_image_path:
-            session["input_image"] = input_image_path
-        elif not session.get("input_image"):
-            session["input_image"] = None
-        # else: 保持已有的 input_image 不变
+            # User uploaded a new image — use it
+            pass
+        elif session.get("turns"):
+            # Auto-link: use the last successful turn's output
+            for prev_turn in reversed(session["turns"]):
+                prev_exec = prev_turn.get("execution_result") or {}
+                if prev_exec.get("success") and prev_exec.get("output_path"):
+                    input_image_path = prev_exec["output_path"]
+                    input_source = "previous_output"
+                    input_from_turn = prev_turn["turn_id"]
+                    break
+            if not input_image_path:
+                # No successful prior output — reuse the first turn's input
+                input_image_path = session["turns"][0].get("input_image")
+        # else: no turns yet, input_image_path stays as-is (could be None)
 
-        # 检测是否为跟进请求（多轮对话）
-        is_followup = bool(
-            session.get("evaluation_result")
-            or session.get("last_score")
-            or session.get("best_result")
-        )
+        session["input_image"] = input_image_path
+
+        # Create new turn
+        turn = self._create_turn(session, user_request, input_image_path,
+                                 input_source, input_from_turn)
+        current_turn_id = turn["turn_id"]
+        self._persist_session(session_id)
+
+        # Append user message to current turn
+        msg_count = len(turn.get("messages", []))
+        user_msg = {
+            "id": f"{session_id}_{current_turn_id}_user",
+            "role": "user",
+            "content": user_request,
+            "timestamp": datetime.now().isoformat(),
+            "status": "sent",
+        }
+        if input_image_path:
+            user_msg["imageUrl"] = input_image_path
+        turn.setdefault("messages", []).append(user_msg)
+        # Also append to session-level for backward compat
+        session.setdefault("messages", []).append(user_msg)
+
+        # Detect follow-up
+        is_followup = len(session["turns"]) > 1
 
         session["status"] = "processing"
         self._persist_session(session_id)
@@ -534,6 +561,8 @@ class ControllerAgent:
             "last_score") if is_followup else None
         search_results = None
         generated_code = None
+        execution_result = None
+        evaluation_result = None
         previous_code_hash = None
         previous_output_hash = None
         stagnant_iterations = 0
@@ -737,7 +766,8 @@ class ControllerAgent:
                 code_hash = self._hash_text(generated_code)
                 session["generated_code"] = generated_code
                 code_file = self.resource_manager.save_workspace_code(
-                    session_id, f"iteration_{iteration_count}.py", generated_code)
+                    session_id, f"iteration_{iteration_count}.py", generated_code,
+                    turn_id=current_turn_id)
                 session["generated_code_path"] = code_file
                 self._record_agent_call(
                     session_id,
@@ -852,7 +882,8 @@ class ControllerAgent:
                             code_hash = self._hash_text(generated_code)
                             session["generated_code"] = generated_code
                             code_file = self.resource_manager.save_workspace_code(
-                                session_id, f"iteration_{iteration_count}_revised.py", generated_code)
+                                session_id, f"iteration_{iteration_count}_revised.py", generated_code,
+                                turn_id=current_turn_id)
                             session["generated_code_path"] = code_file
                             emit_agent_update(
                                 f"CodeGen 已根据前置评估反馈修正代码，现在执行修正后的版本。",
@@ -885,12 +916,14 @@ class ControllerAgent:
                     "data": {"iteration": iteration_count}
                 })
 
+                turn_output_dir = self.resource_manager.build_turn_output_dir(
+                    session_id, current_turn_id)
                 output_filename = f"result_{iteration_count}.png"
                 execution_result = self.execution_agent.execute_code(
                     code=generated_code,
                     input_image_path=input_image_path,
                     output_filename=output_filename,
-                    output_dir=resources["outputs"],
+                    output_dir=turn_output_dir,
                     work_dir=resources["workspace"]
                 )
 
@@ -1041,7 +1074,8 @@ class ControllerAgent:
                         repair_code_file = self.resource_manager.save_workspace_code(
                             session_id,
                             f"iteration_{iteration_count}_repair_{repair_attempt}.py",
-                            repaired_code
+                            repaired_code,
+                            turn_id=current_turn_id
                         )
                         code_file = repair_code_file
                         session["generated_code_path"] = repair_code_file
@@ -1112,7 +1146,7 @@ class ControllerAgent:
                             code=repaired_code,
                             input_image_path=input_image_path,
                             output_filename=output_filename,
-                            output_dir=resources["outputs"],
+                            output_dir=turn_output_dir,
                             work_dir=resources["workspace"]
                         )
 
@@ -1338,6 +1372,16 @@ class ControllerAgent:
                         "code_hash": code_hash,
                         "output_hash": output_hash
                     }
+
+                # Record this iteration into the turn
+                turn.setdefault("iterations", []).append({
+                    "iteration": iteration_count,
+                    "score": current_score,
+                    "code_hash": code_hash,
+                    "output_hash": output_hash,
+                    "output_path": execution_result.get("output_path") if execution_result.get("success") else None,
+                })
+
                 self._persist_session(session_id)
 
                 self.add_state_log(session_id, "EvaluationAgent", f"evaluation_complete_{iteration_count}", "success",
@@ -1520,6 +1564,14 @@ class ControllerAgent:
                         metadata={"recorded_score": final_score,
                                   "approach": final_approach[:100]}
                     )
+
+            # Finalize the current turn with accumulated results
+            turn["generated_code"] = generated_code
+            turn["code_path"] = session.get("generated_code_path")
+            turn["execution_result"] = execution_result
+            turn["evaluation_result"] = session.get("evaluation_result")
+            final_status = session.get("status", "completed")
+            self._finalize_turn(session, turn, final_status)
 
         except Exception as e:
             session["status"] = "error"
